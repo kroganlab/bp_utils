@@ -1,0 +1,232 @@
+---
+title: "Protein Coverage of Different Proteolysis Enzymes"
+runtime: shiny
+output: html_document
+---
+```{r, eval=FALSE, echo=FALSE}
+# To run this file, open in RStudio and click "Run Document".  It should open in a browser, or RStudio preview Browser and allow you to
+# select files of peptide lists and view the results as venn diagrams.
+```
+
+```{r,message=FALSE, echo=FALSE}
+library (data.table)
+library (VennDiagram)
+library (grid)
+library (RColorBrewer)
+library (R.utils) # required for reading gzip files in fread
+
+LoadPeptideSites = function(file){
+  peptides = fread(file)[,.(protein = `Leading razor protein`, start = `Start position`, end = `End position`)]
+  peptides = peptides[!substr(protein,1,3) %in% c("CON", "REV") ,]
+  sites = do.call(rbind.data.frame, 
+                  lapply(1:nrow(peptides), 
+                         function(i) {
+                           data.frame(protein = peptides$protein[i], 
+                                      site=peptides$start[i]:peptides$end[i], 
+                                      stringsAsFactors=FALSE)
+                         }
+                  )
+  )
+  return (unique(paste (sites$protein, sites$site, sep="-") ))
+}
+
+
+```
+
+
+```{r, echo = FALSE}
+files = c()
+
+```
+
+Select files of peptide lists to "upload" and process. 
+
+Expectations of files:
+
+1. All peptides from a single enzyme (or other proteolysis condition to compare) in a single file.
+2. File name will include an enzyme name (or other descriptor you'd like to use in images) as a prefix followed by an underscore, e.g. Trypsin_Peptides.txt
+2. File contents are a text table (gzip ok), with at least the columns:  "Leading razor protein", "Start position", "End position".
+
+All other columns will be ignored.  Protein names that begin with CON or REV will be ignored.
+
+
+
+```{r, echo = FALSE}
+#Input elements go here
+
+#htmlOutput("enzyme.list.out")
+
+fileInput("file1.input", "select your enzyme files", multiple=TRUE)
+```
+A table of loaded enzymes will appear below
+(this takes a few seconds to load after selecting files):
+```{r, echo=FALSE}
+renderTable ({
+  req(values$siteSets)
+  data.frame ("Enzyme" = names(values$siteSets), "Count_Sites" = unlist(lapply(values$siteSets, length)))
+})
+
+```
+
+```{r, echo = FALSE}
+siteSets = list()
+values = reactiveValues(siteSets = siteSets)
+
+observeEvent(input$file1.input, {
+  withProgress(message="Building non-redundant sets of sites", value = 0.1,{
+    for (i in seq_along(input$file1.input[,1])){
+      enzymeName = unlist(strsplit(basename(input$file1.input$name[i]), split="_"))[1]
+      tryCatch({
+          values$siteSets[[enzymeName]] <- LoadPeptideSites(input$file1.input$datapath[i])
+        }, 
+        error = function(e){
+          showNotification(paste ("Error while reading:", basename(input$file1.input$name[i]), e, sep="\n"), type="error")
+          return
+        })
+      incProgress(amount = 1/nrow(input$file1.input))
+    }
+  })
+})
+
+reactivePalette = reactive({
+    palette = brewer.pal(8, "Set2")
+    names(palette)[seq_along(values$siteSets)] = names(values$siteSets)
+    palette
+})
+
+```
+
+## Single Venn Diagrams
+Numbers are the number of unique amino acid positions included in the entire peptide table.
+```{r, echo=FALSE}
+
+singleVImageHeight = function(){200}
+singleVImageWidth = function(){
+  imageCount <- length(names(values$siteSets))
+  if (imageCount == 0) imageCount <- 1
+  singleVImageHeight() * imageCount
+}
+
+renderPlot(height = singleVImageHeight, width = singleVImageWidth,{
+  req(values$siteSets)
+  req (length(values$siteSets) >=1)
+
+  palette = brewer.pal(8, "Set2")
+  names(palette)[seq_along(values$siteSets)] = names(values$siteSets)
+  
+  singleVenns = sapply (names(values$siteSets), 
+                        function(name){
+                          draw.single.venn(area=length(values$siteSets[[name]]), category = name, ind=FALSE, fill = reactivePalette()[name])
+                        },
+                        simplify=FALSE
+  )
+  
+  maxSet = max(sapply (values$siteSets, length))
+  
+  for (i in 1:length(values$siteSets)){
+    scaleFactor = sqrt(length(values$siteSets[[i]])/maxSet)
+    pushViewport ( viewport(x=(i-1)/length(values$siteSets), y=0, height=scaleFactor, width=scaleFactor * 1/length(values$siteSets), just=c("left", "bottom")))
+    grid.draw(singleVenns[[i]])
+    popViewport()
+  }
+  
+})
+
+```
+
+## Double Venn Diagrams
+
+```{r, echo=FALSE}
+
+doubleVImageHeight = function(){250}
+doubleVImageWidth = function(){
+  imageCount <- if (length(values$siteSets) < 2)
+    0
+  else
+    length(combn(names(values$siteSets), 2, simplify=FALSE))
+  if (imageCount == 0) imageCount <- 1
+  doubleVImageHeight() * imageCount
+}
+
+
+renderPlot(height = doubleVImageHeight, width=doubleVImageWidth,{
+  req(values$siteSets)
+  req (length(values$siteSets) >=2)
+  pairs = combn(names(values$siteSets), 2, simplify=FALSE)
+  maxSet = max (sapply (pairs, 
+                        FUN = function(pair){
+                          length(union(values$siteSets[[pair[1]]], values$siteSets[[pair[2]]]))
+                        }
+  )
+  )
+  grid.newpage()
+  i = 0
+  for (pair in pairs){
+    i = i+1
+    set1 = values$siteSets[[pair[1]]]
+    set2 = values$siteSets[[pair[2]]]
+    area1 = length(set1)
+    area2 = length(set2)
+    cross.area = length(intersect(set1,set2))
+    scaleFactor = sqrt(length(union(set1,set2))/maxSet)
+    pushViewport ( viewport(x=(i-1)/length(pairs), y=0, height=scaleFactor, width=scaleFactor * 1/length(pairs), just=c("left", "bottom")))
+    
+    draw.pairwise.venn (area1, area2, cross.area, category = pair, fill = reactivePalette()[pair])  
+    
+    popViewport()
+  }
+  
+  
+})
+```
+
+## Triple Venn Diagrams
+
+```{r, echo = FALSE}
+tripleVImageHeight = function(){300}
+tripleVImageWidth = function(){
+  imageCount <- if (length(values$siteSets) < 3)
+    0
+  else
+    length(combn(names(values$siteSets), 3, simplify=FALSE))
+  if (imageCount == 0) imageCount <- 1
+  tripleVImageHeight() * imageCount
+}
+renderPlot(height = tripleVImageHeight, width = tripleVImageWidth, {
+  req(values$siteSets)
+  req (length(values$siteSets) >=3)
+  triples = combn(names(values$siteSets), 3, simplify=FALSE)
+  maxSet = max (sapply (triples, 
+                        FUN = function(triple){
+                          length(union(union(values$siteSets[[triple[1]]], 
+                                             values$siteSets[[triple[2]]]),
+                                       values$siteSets[[triple[3]]]
+                          )
+                          )
+                        }
+  )
+  )
+  grid.newpage()
+  i = 0
+  for (triple in triples){
+    i = i+1
+    set1 = values$siteSets[[triple[1]]]
+    set2 = values$siteSets[[triple[2]]]
+    set3 = values$siteSets[[triple[3]]]
+    area1 = length(set1)
+    area2 = length(set2)
+    area3 = length(set3)
+    n12 = length(intersect(set1,set2))
+    n23 = length(intersect(set2,set3))
+    n13 = length(intersect(set1, set3))
+    n123 = length(intersect(intersect(set1,set2), set3))
+    scaleFactor = sqrt(length(union(union(set1,set2),set3))/maxSet)
+    pushViewport ( viewport(x=(i-1)/length(triples), y=0, height=scaleFactor, width=scaleFactor * 1/length(triples), just=c("left", "bottom")))
+    
+    draw.triple.venn (area1, area2, area3, n12, n23, n13, n123, category = triple,  fill =reactivePalette()[triple] ) 
+    
+    popViewport()
+  }
+})
+
+```

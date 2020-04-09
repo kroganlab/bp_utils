@@ -1,0 +1,365 @@
+---
+title: "Introducing data.table"
+author: "Ben Polacco"
+date: "3/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Manipulating data tables in R
+
+There are different competing packages for data manipulatin in R.  The three main ones are:
+
+* Base R, main object is data.frame. No package imports needed
+* data.table, main object is data.table. library (data.table)
+* dplyr, part of tidyverse, main object is tibble, aka tbl_df.  library(dplyr) or library(tidy)
+
+
+Base data.frame is not as powerful and easy to use as the other options which imporve upon it. But it is still useful to know it because most data.frame syntax will work on both data.table and tibble objects.
+
+
+## Base R
+### Loading data in base R
+```{R}
+# load data
+df <- read.table ("results.txt",sep=",", header=TRUE)
+
+# read.csv and read.delim are also available, but in all cases you have to know
+# what the format is in your file: are there headers, what separates the fields, etc...
+# I point this out because the data.table function fread is much more convenient
+
+# quick view of the data using str to display the structure of the data or head to show just the first part
+
+str(df)
+
+
+head(df)
+
+```
+
+
+### subsetting data.frame in base R
+
+The fundamental way of subsetting data in R is via indeces inside square brackets.  Powerfully, but sometimes confusingly, indeces come in different forms
+
+* integer based: a[c(1,4,5)] means get the first, fourth and fifth items
+* boolean basdd: a[c(TRUE, FALSE, FALSE, TRUE, TRUE)] also means get the first, fourth, and fifth items
+* name based: a[c("alice", "dave", "edna")] gets the items with the names
+
+Example:
+
+```{r}
+a = runif(5) # select five random numbers
+names(a) <- c("alice", "bob", "charlie", "dave", "edna") # give them names
+
+a
+a[c(1,4,5)]
+a[c(TRUE, FALSE, FALSE, TRUE, TRUE)]
+a[c("alice", "dave", "edna")]
+
+```
+
+In a data.frame, or other two dimensional objects, there are two sets of indeces applied, separated by a comma.  First position chooses rows, and the second choosese columns. Returning to the data set that I loaded earlier, the output of msstats
+
+```{r}
+# the item in the first row and fifth column:
+df[1,5]
+
+# leaving an index blank for row or column gets us all items without any subsetting in that dimension
+# example, this gets the first and third columns, we use head to view the data here without running too long
+head(df[,c(1,3)])
+
+
+#indeces can be boolean based as well which is valuable for filtering based on value
+head (df[df$log2FC > 3.5,c(1,3)])
+
+# or name based, but usually in our case only columns have names in a data.frame
+
+head(df[df$log2FC > 3.5,c("Protein", "log2FC", "Protein_name")])
+
+
+```
+
+### modifying/adding/removing columns
+
+The main way of changing columns is with the assignment operator: "<-".  This can be used to do modify, add or remove columns.  (Under the hood there actually is no such thing as modifying a column. Modifying a column is both a removal and an addition of the same named column. )
+
+```{r}
+# adding a non-log fold Change
+df$foldChange <- 2^df$log2FC
+str(df)
+
+# modifying a column: shortening Protein_label to just the first 20 characters
+df$Protein_label <- substr(df$Protein_label, 1, 20)
+head (df[, c("Protein", "Protein_label")] )
+
+# deleting a column by setting it to NULL
+df$Protein_name <- NULL
+str(df)
+```
+
+That's about it for base data.frame
+
+
+
+## Manipulating data with data.table
+
+I prefer data.table over dplyr for most data manipulations. That preference is probably due mostly to the order in which I learned things (leaarning base R before either existed, then data.table as something which looks like base R with a few conveniences and speed added), and not simply that one is better than the other.
+
+The main benefits of data.table over base R
+
+* a convenient data reading function : fread
+  + automatically detects file info: header, separator, etc...
+  + faster
+* convenient row and column selections: no need to keep typing the name of the data.frame
+* convenient and memory-friendly column manipulations through := operator
+
+
+## loading data
+No need to pre-inspect the data file, just read it in with fread (and note how fast it goes):
+```{r}
+library(data.table )  # load the data.table package so R knows to look there for function names
+dt <- fread ("results.txt")
+str(dt)
+```
+
+That should look the same as our data.frame object df.  Note that this dt has class data.table in addition to data.frame. This means it has the features of data.table but can still be used in functions that are only aware of data.frames.
+
+## data table [i,j] syntax
+
+A data.table behaves much like a data.frame in selecting rows and columns.  dt[i,j] will select rows and columns, but note that when you write an expression for i or j, you do not need to keep retyping the data.table name.
+This is no big deal when data.table names are short like "dt", but all that typing becomes much more of an annoyance when names are long you're combing multiple rows.
+
+Data frame way, but imagine we had a long name:
+```{r}
+longButInformativeDataFrameName <- df
+
+head (longButInformativeDataFrameName[longButInformativeDataFrameName$pvalue < 0.01 &
+                                        longButInformativeDataFrameName$log2FC > 3 &
+                                        longButInformativeDataFrameName$MissingPercentage < 0.5,
+                                      c("Protein", "log2FC", "pvalue")])
+
+```
+
+Now in data.table:
+```{r}
+longButInformativeDataTableName <- dt
+longButInformativeDataTableName[pvalue < 0.01 &
+                                  log2FC > 3 & 
+                                  MissingPercentage < 0.5,
+                                .(Protein, log2FC, pvalue)]
+```
+
+Some differences to point out:
+
+* No need to type the data.table name inside the []. data.table knows to look for columns first to match variable names inside []
+* After the first comma, the column names are selected inside .() and no need to quote them
+  + .() is actually shorthand for list() here. This detail  is relevant in understanding advanced used of data.table but can be ignored for now.
+* data.table handles "NA" in boolean indeces differently.  Note that no NA rows are returned.  The rows with all NA in data.frame are the result of NA for pvalues. This is just omething to be aware of.
+* data.table has a handy print function that only shows the first few and last few rows of a large data.table.  No need for the head function.
+
+## "j" can do more than select columns in data.table
+
+...but it always expresses columns
+
+### it can return manipulations of data
+
+Here I want to view the un-transformed fold change
+
+```{r}
+dt[Protein== "A0AVF1", 2^log2FC]  # .() is optional when only one column is being returnd in j
+
+#same as above, but let's keep the run information:
+dt[Protein== "A0AVF1", .(Label,2^log2FC)] 
+
+#note that you can give an informative column name inside the .() for your newly computed columns
+dt[Protein== "A0AVF1", .(Label, foldChange = 2^log2FC)] 
+```
+
+### it can also modify/add/remove columns to the table using :=
+Note that in all cases below, I need to include the first comma inside [] to indicate that my expression is in the j position.
+
+```{r}
+#modify Protein_label to a short version
+dt[,Protein_name := substr (Protein_name, 1,20)]
+
+# adding a column for non-log Fold Change
+dt[,foldChange := 2^log2FC]
+
+# removing a column
+dt[,Protein_name := NULL]
+
+```
+
+These are similar to data.frame, but more convenient with less typing. They're also more friendly in their use of memory, but most of hte time you don't have to worry about that. 
+
+### it can also easily modify just a subset of a column
+
+New to data.table is the easy manipulation of just a subset of rows.  As an example, let's take care of some of those NA values in the pvalue column.  I suspect these are due to infinite values in log2FC, so let's look at that.
+
+To inspect his, in the i position I select all rows that have NA for pvalue, then in j I ask to return just the unique log2FC using the j position. I suspect these are Inf/-Inf
+
+```{r}
+
+dt[is.na(pvalue), .(unique(log2FC))]
+```
+
+To my surprise, it looks like there's also NA values in the log2FC.  Lets look at those:
+
+```{r}
+dt[is.na(pvalue) & is.na(log2FC),]
+```
+
+The completeMissing stands out in the issue column, so let's see if that explains all of them.  Note that below I select a single column using the $ operator after my [].  This is base R, works without first using [], works on data.frames and lists, but always selects just a single named column or list item. 
+
+```{r}
+all(dt[is.na(pvalue), .(unique(log2FC))]$issue == "completeMissing")
+```
+
+We could also have added the column "issue" to our uniqe row analysis above by applying the unique function to a data.table (of two columns in this case):
+```{r}
+unique(dt[is.na(pvalue), .(log2FC, issue)] )
+```
+
+This also confirms that all NA  log2FC rows have issue=completeMissing.
+
+Back to the task at hand which is assigining thes pvalues to something meaningful. For the Inf and -Inf cases, lets make the pvalue zero.  That's not quite accurate, but it is sometimes helpful if we want to include these in our analysis:
+
+```{r}
+dt[is.na(pvalue) & is.infinite(log2FC), pvalue := 0]
+```
+
+To make sense of that.  The i part selects those rows with NA in pvalue and an infinite number in log2FC.  Then, in just the rows selected in i, the j part sets the column pvalue to 0.   Redoing this view of large significant fold change now includes the infinite fold change items:
+
+```{r}
+dt[pvalue < 0.01 &
+     log2FC > 3 & 
+     MissingPercentage < 0.5,
+   .(Protein, log2FC, pvalue)]
+```
+
+## The third position: data table [i,j,by=]
+
+In the third position within data.table [], you can do a few different things.  The most common is to set a by= term which applies a grouping variable to calculate on. As an example, say you wanted to count the number of positive and significant log2FC per experiemnt "Label":
+
+```{r}
+dt[log2FC > 0 & pvalue < 0.01,
+   .(countPositive = length(log2FC)),
+     by  = .(Label)]
+```
+
+Above I counted rows using length applied to a single column.  Counting rows can also be done using a data.table shorthand: .N
+
+We can also do various different calculations of various complexity in the same grouping:
+
+```{r}
+dt[log2FC > 0 & pvalue < 0.01,
+   .(countPositive = .N, medianLog2FC = median(log2FC), numInfinite = sum(is.infinite(log2FC))),
+   by  = .(Label)]
+```
+
+There are more things you can do within the [i,j,by=] framework, but the above should make a good intro for most work.
+
+
+## Larger manipulations of data.table or data.frame
+
+There are probably three large-scale data table manipulations that you'll want to do. These apply equally as well to data.frame as data.table, but often data.table has a faster or more convenient way of doing it.
+
+* merging two tables
+* converting from long to wide format
+* converting from wide to long format
+
+### merging tables
+
+This is used to combine the columns of two tables when the row number and/or order is not already properly aligned.  One simple case would be adding protein annotations, which could include names or different identifiers (uniprot, entrez, gene symbol), to a table that only includes one simple identifiers.  For example, say our data didn't have Protein_label, but we had such a mapping table between uniprot and label.  Let's set up that toy problem.
+
+```{r}
+#first make a mapping table
+uniprotLabelMapper <- unique(dt[,.(Protein, Protein_label)]) 
+
+#now delete the Protein_label column using :=
+dt[,Protein_label := NULL]
+
+```
+If you inspect dt and uniprotLabelMapper you will see that that uniprotLabelMapper has 4370 rows, and two columns.  We're pretending this is an outside source of data that we wanted to use to annotate dt. 
+
+To do so, a merge is called for.  In its simplest case you name the two data tables to merge, then name a column to match between the data tables. The "by" column together with the remaining columns from both tables will then be merged into a new table.
+
+```{r}
+dtNew <- merge (dt, uniprotLabelMapper, by = "Protein")
+```
+
+Important things to keep in mind are that the merge only keeps rows that match by default. This is not desirable in this case becaues we don't want to lose rows just because we don't have a Protein_label.  The solution is to use all.x=TRUE, all.y=TRUE or all=TRUE (for both). Example:
+
+```{r}
+smallMapper <- uniprotLabelMapper[1:5,]
+smallMapper
+
+dtNew <- merge (dt, smallMapper, by = "Protein")
+nrow(dtNew)
+```
+
+Fix this with all.x =TRUE to keep all rows in the first table.  Extra rows in the second table would be dropped.
+
+```{r}
+# add extra dummy rows using rbind
+smallMapper <- rbind (smallMapper, data.table(c("QWERTY", "ASDFGH"), c("keyboard1", "keyboard2")), use.names=FALSE)
+smallMapper
+
+dtNew <- merge (dt, smallMapper, by = "Protein", all.x=TRUE)
+nrow(dtNew) == nrow(dt)
+```
+
+### converting long to wide format
+
+Understanding what is long and wide format is half the challenge here.  The current dt is in long format. Each column represents a different data type and measurements across different experimental conditions are appended within each column making the columns longer. In wide format, some different columns would represent the same measurement or data type from different experiments.  A heatmap is a visual example of wide format.
+
+dcast is the function to convert a data.table from long to wide.  In general, dcast takes one column of the table, slices it among different experements (or some other grouping variable), and arranges them in different columns named by experiment.  The rows would then correspond to another variable. The most common dcast would have experimental treatment in columsn and protein/gene in rows, and probalby log2FC in most of the columns.  Here's how that's done:
+
+```{r}
+dt_wide <- dcast (dt, Protein~Label, value.var="log2FC")
+#inspect the result
+dt_wide
+```
+
+"Protein~Label" is what's called a formula.  Also used in linear models.  I read it as "Protein" depends on "Label", and I know that the first position (left hand side) defines rows like usual and the second position defines columns.  value.var tells dcast which column in the original data.table to slice up and populate the table.   
+
+Both sides of the formula can have multiple terms.  On the left hand side, these would add new grouping columns to the table to identify the rows, and on the right hand side, these would add new grouping variables so identify the columns.  Example 
+
+```{r}
+# first add some columns to make this example possible:
+dt[,c("receptor", "drug", "time") := tstrsplit (gsub( "-compBG", "", Label), split="_")]
+dt[,species:='human']
+
+dt_wide <- dcast (dt, species+Protein~drug+time, value.var="log2FC")
+```
+
+
+Typically this would happen before converting to a matrix and passing into a function that requires a matrix such as image, heatmap or dist:
+
+```{r}
+dt_wide <- dcast (dt, Protein~drug+time, value.var="log2FC")
+dt_mat <- as.matrix(dt_wide, rownames="Protein")
+image (dt_mat)
+
+# heatmap dies on NA and infinite values, so fix those:
+dt_mat[is.na(dt_mat)] <- 0
+dt_mat[dt_mat < -5] <- -5 
+dt_mat[dt_mat >  5] <-  5 
+heatmap(dt_mat, scale="none", col=colorRampPalette(c("navy", "white", "firebrick"))(1024))
+```
+
+
+### wide to long format
+
+The reverse is also possible, and uses a function called melt. This one always requires consulting help for me.
+
+```{r}
+?melt
+
+melt(dt_wide, id.vars = c("Protein"), variable.name="drug_time", value.name="log2FC")
+
+```
