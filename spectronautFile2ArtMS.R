@@ -108,6 +108,7 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH"){
   # evidence.txt becomes evidence.site.txt
   # config.yaml becomes config.site.yaml
   
+  # set new paths and confirm that they are new (confirm that gsub found something to work on)
   newEvidence <- gsub (".txt$", paste0(".",site,".txt"), artmsInput$config_data$files$evidence)
   stopifnot (newEvidence != artmsInput$config_data$files$evidence)
   
