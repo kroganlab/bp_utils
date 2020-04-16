@@ -77,12 +77,13 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
                     
                     sequence = cleanModifiedSequence(PeptideSequence),
                     oxidation..m. = str_count(PeptideSequence, coll("[Oxidation (M)]")),
+                    missed.cleavages = countMissedCleavage(PeptideSequence, enzyme="trypsin"),
                     type = "SPECTRONAUT", #should be MSMS, MULTI-MSMS, MULTI-SECPEP...
                     ms.ms.count = 99,
                     
                     retention.length = rnorm(.N, mean=1, sd=0.1),
                     uncalibrated.mass.error..ppm. = rnorm(.N, mean=5, sd=2),
-                    m.z = length(PeptideSequence) * 100/PrecursorCharge
+                    m.z = str_length(PeptideSequence) * 100/PrecursorCharge
                     )]
   
   if (!is.null(outFilePrefix)){
@@ -192,6 +193,17 @@ makeOutFilePaths <- function (outFilePrefix){
   names(paths) <- suffixes
   return (paths)
 }
+
+countMissedCleavage <- function (peptides, enzyme = "trypsin"){
+  patterns <- c(trypsin="[KR][ACDEFGHIKLMNQRSTVWY]") #Welcome to our OOL. Notice there's no P in it.
+  if (!enzyme %in% names(patterns)){
+    message ("I don't know how to count missed cleavages for enzyme ", enzyme)
+    return (NA)
+  }
+  return (str_count(peptides, patterns[[enzyme]]))
+}
+
+
 
 # main purpose is to write paths into a new artms config file
 # presetConfig lets a user pass in a (possibly partial) nested list of artms configurations
