@@ -60,7 +60,7 @@ fixMsigdbGONames <- function(names){
   names <- tolower(names)
 }
 
-enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title=""){
+enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, negCols = NULL,...){
   setorder(simplifiedEnrichTable, p.adjust)
   bestTermPerBait <- simplifiedEnrichTable[p.adjust<0.05,.(ID=ID[1:topN]),by=groupColumn]
   
@@ -72,23 +72,42 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   
   counts.wide <- dcast (fullEnrichTable[ID %in% bestTermPerBait$ID], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
   counts.mat <- as.matrix(counts.wide, rownames="Description")
+  
+  if (!is.null(cols)){
+    if (! all(cols %in% colnames(counts.mat) & cols %in% colnames(main.mat))){
+      message ("Not all requested columns for heatmap found in data")
+      message ("main.mat ", paste(colnames(main.mat), collapse=" "))
+      message ("counts.mat ", paste(colnames(counts.mat), collapse=" "))
+    }else{
+      counts.mat<- counts.mat[,cols]
+      main.mat<- main.mat[,cols]
+    }
+    
+  }
   #print(str(counts.mat))
   
   
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
+  #Reds = colorRampPalette(RColorBrewer::brewer.pal(9, "Reds"))
+  colors <- Blues(100)
+  
+  if (!is.null(negCols)){
+    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(RColorBrewer::brewer.pal(11, "RdBu"))(101))
+    main.mat[,negCols] = -main.mat[, negCols]
+  }
   
   
   ##Plot main figure heatmap
-  hm <- ComplexHeatmap::Heatmap(main.mat, col = Blues(100), border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
+  hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
                                 show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(q-value)"),
                                 row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
                                 cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.na(counts.mat[i,j])){
-                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="red"))
+                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
                                   }
-                                })
+                                }, ...)
   
   draw(hm,heatmap_legend_side="top")
 }
