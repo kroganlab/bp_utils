@@ -55,8 +55,8 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
 
 
 fixMsigdbGONames <- function(names){
-  names <- gsub("GO_","",names)
-  rnames <- gsub("_"," ",names)
+  names <- gsub("^GO_","",names)
+  names <- gsub("_"," ",names)
   names <- tolower(names)
 }
 
