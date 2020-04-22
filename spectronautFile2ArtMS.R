@@ -48,7 +48,7 @@ library (stringr)
 #    to replace a group with a single protein. No such column exists (in the spectronaut files I've seen)
 #
 
-spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig = NULL){
+spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig = NULL, controlPattern = "Ctrl"){
   sn <- fread (filePath)
   
   #bioreplicate needs to be unique across all conditions
@@ -94,7 +94,7 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
     fwrite (evidence, paths["evidence.txt"], sep="\t")
     fwrite (keys, paths["keys.txt"], sep="\t")
     configData <- writeConfigFile(paths, artmsConfig)
-    writeContrastFile(paths, keys)
+    writeContrastFile(paths, keys, controlPattern = controlPattern)
   } else paths <- c()
   
   invisible(list (evidence_file = evidence, 
@@ -235,9 +235,13 @@ writeConfigFile <- function (paths, presetConfig=NULL){
   invisible(artConfig)
 }
 
-writeContrastFile <- function(paths, keys){
+writeContrastFile <- function(paths, keys, controlPattern=NULL){
   conditions <- unique(keys$Condition)
   contrasts <- unlist(lapply (conditions[conditions != min(conditions)], FUN=function(cond)(paste(cond, conditions[conditions < cond], sep="-"))))
+  if (!is.null(controlPattern)){
+    #keep only those that match controlPattern:
+    contrasts <- grep(controlPattern, contrasts, value=TRUE)
+  }
   write (contrasts, file=paths["contrast.txt"])
   message ("Wrote ", length(contrasts), " contrast to file ", paths["contrast.txt"], " for all by all contrasts:" )
   message (paste("\t", contrasts, collapse="\n"))
