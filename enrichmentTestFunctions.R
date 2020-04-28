@@ -73,6 +73,10 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   counts.wide <- dcast (fullEnrichTable[ID %in% bestTermPerBait$ID], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
   counts.mat <- as.matrix(counts.wide, rownames="Description")
   
+  
+  geneTable <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(gene = unlist(strsplit(geneID, split="/"))),by = ID]
+  geneTable[,cleanName := fixMsigdbGONames(ID)]
+  
   if (!is.null(cols)){
     if (! all(cols %in% colnames(counts.mat) & cols %in% colnames(main.mat))){
       message ("Not all requested columns for heatmap found in data")
@@ -92,7 +96,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   colors <- Blues(100)
   
   if (!is.null(negCols)){
-    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(RColorBrewer::brewer.pal(11, "RdBu"))(101))
+    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =rev(colorRampPalette(RColorBrewer::brewer.pal(11, "RdBu"))(101)))
     main.mat[,negCols] = -main.mat[, negCols]
   }
   
@@ -110,4 +114,5 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
                                 }, ...)
   
   draw(hm,heatmap_legend_side="top")
+  invisible(geneTable)
 }
