@@ -148,20 +148,22 @@ setModificationsColumns <- function (dt, site){
     if (s == "PH"){
       dt[grep ("\\(ph\\)", Modified.sequence),Modifications := paste (Modifications, "x Phospho")]
     } else if (s=="UB"){
-      stop ("setModificationsColumns, I still need to check how spectronaut identifies ubiquitination")
-      dt[grep ("\\(ph\\)", Modified.sequence),Modifications := paste (Modifications, "x GlyGly")]
+      #stop ("setModificationsColumns, I still need to check how spectronaut identifies ubiquitination")
+      dt[grep ("\\(gl\\)", Modified.sequence),Modifications := paste (Modifications, "x GlyGly")]
     } else stop ("setModificationsColumns, unknown site requested: ", site)
   }
   invisible(dt)
 }
 
-convertModificationFormat <- function(specModSequence, mods=c("PH", "CAM", "MOX", "NAC")){
+convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC")){
   result <- specModSequence
   specFormats <- list (PH='([STY])\\[Phospho \\(STY\\)\\]',
+                       UB='(K)\\[GlyGly \\(K\\)\\]',
                        CAM = '([C])\\[Carbamidomethyl \\(C\\)\\]',
                        MOX = '([M])\\[Oxidation \\(M\\)\\]',
                        NAC =  '([A-Z])\\[Acetyl \\(Protein N-term\\)\\]')
   artmsFormats <- list (PH='\\1\\(ph\\)',
+                        UB='\\1\\(gl\\)',
                         CAM = '\\1\\(cam\\)',
                         MOX = '\\1\\(ox\\)',
                         NAC = '\\1\\(ac\\)')
