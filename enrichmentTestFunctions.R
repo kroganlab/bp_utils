@@ -116,3 +116,104 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   draw(hm,heatmap_legend_side="top")
   invisible(geneTable)
 }
+
+
+
+
+#  splitCircleHeatMap
+# Instead of shaded rectangles, this plots split circles of varying size and color in each cell.
+# For plotting up to four values per cell, for example up/down size and statistical strength.
+# Size is denoted by area of the half circle and statistical strength by color. 
+# This function takes up to four numeric matrices as arguments.
+# If only the *Color matrices are passed in, they will be used for size as well.
+# Size matrices must be positive.  Color matrices are more flexible and the mapping
+# can be controlled through colFunLeft and colFunRight
+# 
+# It currently does not print a legend showing size of semicircles.
+# 
+# This relies on ComplexHeatmap and many parameters can be successfully passed through to Heatmap
+# 
+# For examples, see test_splitCircleHeatMap
+
+
+splitCircleHeatMap <- function (matLeftColor, matRightColor,
+                                matLeftSize=NULL, matRightSize=NULL,
+                                colFunLeft = NULL, colFunRight = NULL,
+                                leftLegendTitle = "left", rightLegendTitle = "right",
+                                legends = NULL, ...){
+  if (is.null(colFunLeft))colFunLeft <- colorRamp2(c(0, max(matRight)), c("#EEEEEE", "blue"))
+  if (is.null(colFunRight))colFunRight <- colorRamp2(c(0, max(matRight)), c("#EEEEEE", "red"))
+  
+  if (is.null(matLeftSize))matLeftSize <- matLeftColor
+  if (is.null(matRightSize))matRightSize <- matRightColor
+  
+  stopifnot(all(matLeftSize > 0), all(matRightSize > 0))
+  maxSize <- max(c(matLeftSize, matRightSize), na.rm=TRUE)
+  matLeftSize <- sqrt(matLeftSize/maxSize)
+  matRightSize <- sqrt(matRightSize/maxSize)
+  
+  
+  # define the function that will do the work of drawing inside a cell
+  cell_fun <- function(j, i, x, y, width, height, fill){
+    
+    # trick to draw half circles is to define a viewport that will clip, and then draw
+    # the circle at the edge of the viewport.
+    # https://stackoverflow.com/questions/31538534/plotting-half-circles-in-r
+    
+    vp <- viewport (x-0.5*width,y, width = width, height= height, clip="on")
+    grid.circle(1.0,0.5, r = abs(matLeftSize[i, j])/2, 
+                gp = gpar(fill = colFunLeft(matLeftColor[i, j]), col = NA), vp = vp)
+    
+    vp <- viewport (x+0.5*width,y, width = width, height= height, clip="on")
+    grid.circle(0,0.5, r = abs(matRightSize[i, j])/2, 
+                gp = gpar(fill = colFunRight(matRightColor[i, j]), col = NA), vp = vp)
+    
+  }
+  
+  if (is.null(legends)){
+    legends <- packLegend(Legend(col_fun = colFunLeft, title= leftLegendTitle),
+                          Legend(col_fun = colFunRight, title= rightLegendTitle))
+  }  
+  hm<-Heatmap (matLeftColor,  #this is what it will cluster and label with, otherwise this is ignored
+               rect_gp = gpar(type = "none"), 
+               cell_fun = cell_fun,
+               show_heatmap_legend=FALSE,
+               ...)
+  draw(hm, heatmap_legend_list = legends)
+  
+}
+
+
+
+test_splitCircleHeatMap <- function(){
+  library (ComplexHeatmap)
+  
+  rn <- c("Rahman, Taylor", "Hageman, Allie", "el-Saeed, Misfar", "Brown, Rohan", 
+          "el-Shah, Habeeba", "Dougal, William", "Schubert, William", "Laut, Jessica", 
+          "Wimberly, Elias", "Garcia-Espinoza, Christian", "Buccieri, Thaylor", 
+          "Magno, Paige", "Garcia, Jessica", "al-Ayoub, Rasheeq", "Woodall, Taylor", 
+          "Thatcher, Alex", "Lin, Kyle", "Walck, William", "el-Qazi, Mutlaq", 
+          "el-Azzi, Zain")
+  
+  cn <- c("Nguyen Do, Michael", "Begay, David", "Martinez, Marta", "Hotchkiss, Sheela", 
+          "Beightel, Ruben", "Trujillo, Cameron", "King, Mary", "Aquiningoc, Yu Sung", 
+          "Hall, Michaela", "Maestas, Thalia", "Ross, Lily", "Smith, Faith", 
+          "al-Tabet, Muhyddeen", "Gurule, Alicia", "Tardif, Jordan", "Erdenebat, Taylor", 
+          "el-Radwan, Saalima", "el-Aslam, Shaheed", "el-Omer, Azeema", 
+          "Verde, Brandon")
+  
+  splitCircleHeatMap(matrix (runif(400), nrow=20, ncol=20, dimnames = list (rn,cn)),
+                     matrix (runif(400), nrow=20, ncol=20),
+                     matrix (runif(400), nrow=20, ncol=20),
+                     matrix (runif(400), nrow=20, ncol=20),
+                     leftLegendTitle = "decreasers",
+                     rightLegendTitle = "increasers",
+                     #these next will get passed right to ComplexHeatmap
+                     cluster_columns=FALSE, 
+                     column_split = sample(c(1,2), 20, replace=TRUE, prob=c(0.2,0.8)),
+                     row_km = 4,
+                     column_gap = unit(1, "cm"),
+                     row_gap = unit(0.5,"cm"))
+  
+}
+
