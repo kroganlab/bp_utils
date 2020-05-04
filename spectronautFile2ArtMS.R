@@ -104,7 +104,7 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
 }
 
 
-doSiteConversion <- function(artmsInput, referenceProteome,site="PH"){
+doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmod_sites = FALSE){
   # do artms2SiteConversion to generate a new evidence.txt file and then generate a new config.yaml file
   # evidence.txt becomes evidence.site.txt
   # config.yaml becomes config.site.yaml
@@ -123,7 +123,8 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH"){
                               ref_proteome_file = referenceProteome,
                               column_name = "Proteins",
                               output_file = newEvidence,
-                              mod_type = site
+                              mod_type = site,
+                              label_unmod_sites = label_unmod_sites
                               )
   #this gets the default config
   newConfig <- artmsWriteConfigYamlFile (config_file_name = NULL, verbose=FALSE)

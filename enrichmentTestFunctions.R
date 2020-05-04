@@ -60,6 +60,7 @@ fixMsigdbGONames <- function(names){
   names <- tolower(names)
 }
 
+library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, negCols = NULL,...){
   setorder(simplifiedEnrichTable, p.adjust)
   bestTermPerBait <- simplifiedEnrichTable[p.adjust<0.05,.(ID=ID[1:topN]),by=groupColumn]
@@ -90,6 +91,9 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   }
   #print(str(counts.mat))
   
+  # temporary for comparison with splitCircle
+  ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
+  
   
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
   #Reds = colorRampPalette(RColorBrewer::brewer.pal(9, "Reds"))
@@ -103,6 +107,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   
   ##Plot main figure heatmap
   hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
+                                cluster_rows = ddr,
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
                                 show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(q-value)"),
@@ -142,16 +147,35 @@ splitCircleHeatMap <- function (matLeftColor, matRightColor,
                                 leftLegendTitle = "left", rightLegendTitle = "right",
                                 sizeLegendTitle = "size",
                                 legends = NULL, ...){
-  if (is.null(colFunLeft))colFunLeft <- colorRamp2(c(0, max(matLeftColor)), c("#EEEEEE", "blue"))
-  if (is.null(colFunRight))colFunRight <- colorRamp2(c(0, max(matRightColor)), c("#EEEEEE", "red"))
+  
+  #sqrt <- identity  # a hack to test if ~area or ~radius looks better
+  if (is.null(colFunLeft))colFunLeft <- circlize::colorRamp2(c(0, max(matLeftColor)), c("#EEEEEE", "blue"))
+  if (is.null(colFunRight))colFunRight <- circlize::colorRamp2(c(0, max(matRightColor)), c("#EEEEEE", "red"))
   
   if (is.null(matLeftSize))matLeftSize <- matLeftColor
   if (is.null(matRightSize))matRightSize <- matRightColor
   
-  stopifnot(all(matLeftSize > 0), all(matRightSize > 0))
+  stopifnot(all(matLeftSize > 0, na.rm=TRUE), all(matRightSize > 0, na.rm=TRUE))
   maxSize <- max(c(matLeftSize, matRightSize), na.rm=TRUE)
+  minSize <- min(c(matLeftSize, matRightSize), na.rm=TRUE)
+
+  # size legend breaks
+  desiredBreaks <- 4
+  breaks = labeling::extended(minSize, maxSize, m=desiredBreaks)
+  # 
+  if (any(breaks == 0)){
+    if(length(breaks)<=desiredBreaks)
+      breaks[breaks==0] <- min(breaks[breaks!=0])/2
+    else breaks <- breaks[breaks!=0]
+  }
+  maxSize <- max(breaks)
+  
+  
+  
   matLeftSize <- sqrt(matLeftSize/maxSize)
   matRightSize <- sqrt(matRightSize/maxSize)
+
+  
   
   
   
@@ -178,13 +202,14 @@ splitCircleHeatMap <- function (matLeftColor, matRightColor,
   }
   
   if (is.null(legends)){
-    legends <- packLegend(Legend(col_fun = colFunLeft, title= leftLegendTitle),
+    legends <- ComplexHeatmap::packLegend(Legend(col_fun = colFunLeft, title= leftLegendTitle),
                           Legend(col_fun = colFunRight, title= rightLegendTitle))
   }  
-  hm<-Heatmap (matLeftColor,  #this matrix is what it will cluster and label with, otherwise this is ignored
+  hm<-ComplexHeatmap::Heatmap (matLeftColor,  #this matrix is what it will cluster and label with, otherwise this is ignored
                rect_gp = gpar(type = "none"), 
                cell_fun = cell_fun,
                show_heatmap_legend=FALSE,
+               row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
                ...)
   
   # set up variables to catch actual cell size in MM as drawing happens
@@ -194,7 +219,7 @@ splitCircleHeatMap <- function (matLeftColor, matRightColor,
   
   # size legend
   desiredBreaks <- 4
-  breaks = labeling::extended(min(c(matLeftSize, matRightSize)), maxSize, m=desiredBreaks)
+  breaks = labeling::extended(minSize, maxSize, m=desiredBreaks)
   # 
   if (any(breaks == 0)){
     if(length(breaks)<=desiredBreaks)
