@@ -1,7 +1,7 @@
 library (data.table)
 
 
-simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn="bait"){
+simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn="bait", cutHeight = 0.99, broadest=TRUE){
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
     return (list (enrichResultsTable, data.frame()))
@@ -24,7 +24,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   go_dist_mat <- dist(termByGeneMat, method="binary")
   hc <- hclust(go_dist_mat)
   
-  clusters <- cutree(hc, h=0.99)
+  clusters <- cutree(hc, h=cutHeight)
   clusters <- data.table (cluster = as.numeric(clusters), ID = attributes(clusters)$names )
   
   message ("GO terms clustered into ", max(clusters$cluster), " clusters")
@@ -39,18 +39,21 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   clusters <- merge (clusters, genesPerTerm, by.x="ID", by.y="ID")
   #setorder(clusters, -localSetLength)  # the tie breaker
   
-  clusterInfo <- merge (target_overrep_sig, clusters, by = "ID")
+  clusterInfo <- merge (enrichResultsTable, clusters, by = "ID")
   
   clusterInfo[,maxSet := max (setSize), by = c("cluster", groupColumn)]
   #winners <- clusterInfo[,.SD[which(count == maxSet)], by = .(cluster, Bait)]  #keeps all ties...needs updating
-  winners <- clusterInfo[,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
   
-  message (length(unique(winners$ID)), " representative GO terms choosing the broadest significant term per GO-cluster per ", groupColumn)
-  
+  if (broadest){
+    winners <- clusterInfo[p.adjust < 0.01,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$ID)), " representative GO terms choosing the BROADEST significant term per GO-cluster per ", groupColumn)
+  }else{
+    winners <- clusterInfo[p.adjust < 0.01,.SD[which.min(p.adjust),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$ID)), " representative GO terms choosing the MOST significant term per GO-cluster per ", groupColumn)
+  }
   result <- enrichResultsTable[ID %in% winners$ID,]
   list(simplified = result, clusterInfo = clusterInfo)
 }
-
 
 
 
@@ -58,24 +61,65 @@ fixMsigdbGONames <- function(names){
   names <- gsub("^GO_","",names)
   names <- gsub("_"," ",names)
   names <- tolower(names)
+  patterns <- c("\\bdna|dna\\b", 
+                "\\brna|rna\\b", 
+                "\\bgtp|gtp\\b",
+                "\\batp|atp\\b"
+                )
+  replacements <- c("DNA", 
+                    "RNA", 
+                    "GTP",
+                    "ATP"
+                    ) 
+  for (i in seq_along(patterns)){
+    names <- gsub (patterns[i], replacements[i], names)
+  }
+  #capitalize first letter
+  substr(names,1,1) <- toupper(substr(names,1,1))
+  return(names)
 }
+test <- function(){
+  testStrings <- c("external", "rna processing", "gtpase", "atpase")
+  correct <- c("External", "RNA processing", "GTPase", "ATPase")
+  if  (!all(fixMsigdbGONames(testStrings) == correct)){
+    message("fixMsigdbGONames FAIL ", paste(fixMsigdbGONames(testStrings), " "))
+  }
+}
+test()
+
+
 
 library (ComplexHeatmap)
-enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, negCols = NULL,...){
+enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
+                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE,...){
   setorder(simplifiedEnrichTable, p.adjust)
-  bestTermPerBait <- simplifiedEnrichTable[p.adjust<0.05,.(ID=ID[1:topN]),by=groupColumn]
+  bestTermPerBait <- simplifiedEnrichTable[p.adjust<0.01,.(ID=ID[1:topN]),by=groupColumn]
+  if(reduceRedundantsAcrossGroups){  
+    #reduce redundant based on clusters in fullEnrichTable
+    countsByID <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(geneCount  = length(unique(unlist(strsplit(geneID, "/"))))), by = .(ID, cluster)]
+    # get the term with most genes across whole dataset per term-cluster
+    setorder(countsByID, -geneCount)
+    bestTerms <- countsByID[,.SD[1],by=cluster]$ID
+  } else bestTerms <- unique(bestTermPerBait$ID)
   
-  main.wide <- dcast (fullEnrichTable[ID %in% bestTermPerBait$ID], as.formula(paste("Description", groupColumn, sep="~")), value.var="p.adjust")
+  main.wide <- dcast (fullEnrichTable[ID %in% bestTerms], as.formula(paste("Description", groupColumn, sep="~")), value.var="p.adjust")
+  for(col in unique(c(cols,negCols))){
+    if (is.null(main.wide[[col]])) main.wide[[col]] <- NA
+  }
+  
   main.mat <- -log10(as.matrix(main.wide, rownames = "Description"))
   main.mat[is.na(main.mat)] <- 0
   main.mat[main.mat > 5] <- 5
   rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
   
-  counts.wide <- dcast (fullEnrichTable[ID %in% bestTermPerBait$ID], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
+  counts.wide <- dcast (fullEnrichTable[ID %in% bestTerms], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
+  for(col in unique(c(cols,negCols))){
+    if (is.null(counts.wide[[col]])) counts.wide[[col]] <- NA
+  }
   counts.mat <- as.matrix(counts.wide, rownames="Description")
   
   
-  geneTable <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(gene = unlist(strsplit(geneID, split="/"))),by = ID]
+  geneTable <- fullEnrichTable[ID %in% bestTerms, .(gene = unlist(strsplit(geneID, split="/"))),by = ID]
   geneTable[,cleanName := fixMsigdbGONames(ID)]
   
   if (!is.null(cols)){
@@ -92,25 +136,28 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   #print(str(counts.mat))
   
   # temporary for comparison with splitCircle
-  ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
+  #ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
   
   
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
   #Reds = colorRampPalette(RColorBrewer::brewer.pal(9, "Reds"))
   colors <- Blues(100)
   
+  heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)")
+  
   if (!is.null(negCols)){
-    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =rev(colorRampPalette(RColorBrewer::brewer.pal(11, "RdBu"))(101)))
+    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
     main.mat[,negCols] = -main.mat[, negCols]
+    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-4,-2,0,2,4), labels = c(4,2,0,2,4)) )
   }
   
   
   ##Plot main figure heatmap
   hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
-                                cluster_rows = ddr,
+                                #cluster_rows = ddr,
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
-                                show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(q-value)"),
+                                show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = heatmap_legend_param,
                                 row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
                                 cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.na(counts.mat[i,j])){
