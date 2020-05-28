@@ -158,11 +158,11 @@ setModificationsColumns <- function (dt, site){
 
 convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC")){
   result <- specModSequence
-  specFormats <- list (PH='([STY])\\[Phospho \\(STY\\)\\]',
-                       UB='(K)\\[GlyGly \\(K\\)\\]',
-                       CAM = '([C])\\[Carbamidomethyl \\(C\\)\\]',
-                       MOX = '([M])\\[Oxidation \\(M\\)\\]',
-                       NAC =  '([A-Z])\\[Acetyl \\(Protein N-term\\)\\]')
+  specFormats <- list (PH='([STY])[[(]Phospho \\(STY\\)[])]',
+                       UB='(K)[[(]GlyGly \\(K\\)[])]',
+                       CAM = '([C])[[(]Carbamidomethyl \\(C\\)[])]',
+                       MOX = '([M])[[(]Oxidation \\(M\\)[])]',
+                       NAC =  '([A-Z_])[[(]Acetyl \\(Protein N-term\\)[])]')
   artmsFormats <- list (PH='\\1\\(ph\\)',
                         UB='\\1\\(gl\\)',
                         CAM = '\\1\\(cam\\)',
