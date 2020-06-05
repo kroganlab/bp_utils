@@ -171,6 +171,14 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 
 
 
+loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", keyType = "UNIPROT"){
+GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
+gmt <- rbindlist(lapply (GO$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
+gmt$description <- GO$PATHID2NAME[gmt$ont]
+return(gmt)
+}
+
+
 
 #  splitCircleHeatMap
 # Instead of shaded rectangles, this plots split circles of varying size and color in each cell.
