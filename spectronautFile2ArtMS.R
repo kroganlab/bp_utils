@@ -119,13 +119,17 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmo
   #for UB and PH, artMS will filter based on Modification column
   artmsInput$evidence_file <- setModificationsColumns (artmsInput$evidence_file,site)
   
-  artMS::artmsProtein2SiteConversion(artmsInput$evidence_file,
-                              ref_proteome_file = referenceProteome,
-                              column_name = "Proteins",
-                              output_file = newEvidence,
-                              mod_type = site,
-                              label_unmod_sites = label_unmod_sites
-                              )
+  args <- list (evidence_file = artmsInput$evidence_file,
+                ref_proteome_file = referenceProteome,
+                column_name = "Proteins",
+                output_file = newEvidence,
+                mod_type = site)
+  if (!is.null(label_unmod_sites) & !is.na(label_unmod_sites) & label_unmod_sites == TRUE){
+    message ("label_unmod_sites requires a modified artMS")
+    args$label_unmod_sites = label_unmod_sites
+  }
+  
+  do.call(artMS::artmsProtein2SiteConversion, args)
   #this gets the default config
   newConfig <- artmsWriteConfigYamlFile (config_file_name = NULL, verbose=FALSE)
   #set all values passed in from artmsInput...
