@@ -7,7 +7,7 @@ library (stringr)
 # spectroNautFile2ArtMS 
 # inputs: 
 # filepath: path to a file with columns: 
-#          BioReplicate, Condition, Run, IsotopeLabelType, ProteinName, PeptideSequence, PrecursorCharge, Intensity
+#          BioReplicate, Condition, Run, IsotopeLabelType(optional), ProteinName, PeptideSequence, PrecursorCharge, Intensity
 # outFilePrefix:  (optional) a partial path or directory where artMS input files will be written. Most
 #                 useful for running artmsQuantification
 # artmsConfig : (optional) a nested list object that can be used to set options in the output config.yaml file
@@ -63,6 +63,9 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
     sn[,BioReplicate := paste ("BioRep", BioReplicate, sep=".")]
   }
   
+  if (is.null(sn$IsotopeLabelType)){
+    sn[,IsotopeLabelType := "L"]
+  }
   keys <- unique(sn[,.(Condition, 
                        RawFile = Run, 
                        BioReplicate, 
