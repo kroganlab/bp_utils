@@ -88,6 +88,36 @@ test <- function(){
 test()
 
 
+heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="", ...){
+  Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
+  colors <- Blues(100)
+  
+  heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)")
+  
+  if (!is.null(negCols)){
+    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
+    main.mat[,negCols] = -main.mat[, negCols]
+    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-4,-2,0,2,4), labels = c(4,2,0,2,4)) )
+  }
+  
+  
+  ##Plot main figure heatmap
+  hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
+                                #cluster_rows = ddr,
+                                column_title = title,
+                                column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
+                                show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = heatmap_legend_param,
+                                row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
+                                cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(counts.mat[i,j])){
+                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                }, ...)
+  
+  draw(hm,heatmap_legend_side="top")
+  
+}
+
 
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
@@ -110,7 +140,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   main.mat <- -log10(as.matrix(main.wide, rownames = "Description"))
   main.mat[is.na(main.mat)] <- 0
   main.mat[main.mat > 5] <- 5
-  rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
+  #rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
   
   counts.wide <- dcast (fullEnrichTable[ID %in% bestTerms], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
   for(col in unique(c(cols,negCols))){
@@ -139,45 +169,29 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   #ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
   
   
-  Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
-  #Reds = colorRampPalette(RColorBrewer::brewer.pal(9, "Reds"))
-  colors <- Blues(100)
+  heatmapNumbered (main.mat, counts.mat, negCols, title, ...)
   
-  heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)")
-  
-  if (!is.null(negCols)){
-    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
-    main.mat[,negCols] = -main.mat[, negCols]
-    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-4,-2,0,2,4), labels = c(4,2,0,2,4)) )
-  }
-  
-  
-  ##Plot main figure heatmap
-  hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
-                                #cluster_rows = ddr,
-                                column_title = title,
-                                column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
-                                show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = heatmap_legend_param,
-                                row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
-                                cell_fun = function(j, i, x, y, width, height, fill) {
-                                  if (!is.na(counts.mat[i,j])){
-                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
-                                  }
-                                }, ...)
-  
-  draw(hm,heatmap_legend_side="top")
-  invisible(geneTable)
+  invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat))
 }
 
 
 
-loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", keyType = "UNIPROT"){
+loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", keyType = c("UNIPROT", "SYMBOL")){
 GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
 gmt <- rbindlist(lapply (GO$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
 gmt$description <- GO$PATHID2NAME[gmt$ont]
 return(gmt)
 }
 
+
+
+loadKegg <- function (organism="mmu", keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
+  KEGG <- clusterProfiler:::prepare_KEGG(organism, "KEGG", keyType)
+  gmt <- rbindlist(lapply (KEGG$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
+  gmt$description <- KEGG$PATHID2NAME[gmt$ont]
+  return(gmt)
+  
+}
 
 
 #  splitCircleHeatMap
