@@ -88,11 +88,16 @@ test <- function(){
 test()
 
 
-heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="", ...){
-  Blues = colorRampPalette(RColorBrewer::brewer.pal(9, "Blues"))
+heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
+                             borderMatrix = NULL, borderColFun = NULL,
+                             borderMM = 2,
+                             brewerPalette = "Blues",
+                             show_column_dend = FALSE,
+                             border = TRUE, ...){
+  Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
   colors <- Blues(100)
   
-  heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)")
+  heatmap_legend_param = list(legend_direction="horizontal", title = "global enrich\n-log10(adj.p)")
   
   if (!is.null(negCols)){
     colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
@@ -102,19 +107,34 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="", ...
   
   
   ##Plot main figure heatmap
-  hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = TRUE, rect_gp = gpar(col = "grey", lwd = 1),
+  hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = border, rect_gp = gpar(col = "grey", lwd = 1),
                                 #cluster_rows = ddr,
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
-                                show_row_dend = FALSE, show_column_dend = FALSE, heatmap_legend_param = heatmap_legend_param,
+                                show_row_dend = FALSE, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
                                 row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
                                 cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.null(borderMatrix) & !is.null(borderColFun)){
+                                    lwd <- unit(borderMM,"mm")
+                                    grid.rect(x, y, width, height, gp = gpar(fill = borderColFun(borderMatrix[i,j]), col = NA))
+                                    grid.rect(x, y, width-lwd, height-lwd, gp = gpar(fill = fill, col = NA))
+                                  }
                                   if (!is.na(counts.mat[i,j])){
                                     grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
                                   }
-                                }, ...)
+                                }, ...) #+1  # this makes it a list!
   
-  draw(hm,heatmap_legend_side="top")
+  
+  if (!is.null(borderMatrix) & !is.null(borderColFun)){
+    legendList <-  list (Legend(col_fun = colorFun, title= "viral enrich\n-log10(p)"))
+    hm <- hm + 1 # this makes it a list so I can add annotations to it
+  } else{
+    legendList <- list()
+  }
+  
+  draw(hm,heatmap_legend_side="top", annotation_legend_list = legendList)
+  
+  invisible (hm)
   
 }
 
@@ -140,7 +160,9 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   main.mat <- -log10(as.matrix(main.wide, rownames = "Description"))
   main.mat[is.na(main.mat)] <- 0
   main.mat[main.mat > 5] <- 5
-  #rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
+  if (all(grepl("^GO_", rownames(main.mat)))){
+    rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
+  }
   
   counts.wide <- dcast (fullEnrichTable[ID %in% bestTerms], as.formula(paste("Description", groupColumn, sep="~")), value.var="Count")
   for(col in unique(c(cols,negCols))){
@@ -169,9 +191,9 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   #ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
   
   
-  heatmapNumbered (main.mat, counts.mat, negCols, title, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, ...)
   
-  invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat))
+  invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
 
 
