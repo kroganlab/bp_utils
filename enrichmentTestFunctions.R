@@ -120,7 +120,8 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                     grid.rect(x, y, width-lwd, height-lwd, gp = gpar(fill = fill, col = NA))
                                   }
                                   if (!is.na(counts.mat[i,j])){
-                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                    color <- "white" #ifelse (main.mat[i,j] < 2, "grey", "white")
+                                    grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col=color))
                                   }
                                 }, ...) #+1  # this makes it a list!
   
