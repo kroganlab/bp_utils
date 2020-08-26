@@ -136,7 +136,8 @@ chooseRepsInSiteLog2FCData <- function(log2FCData){
   
   #order
   message ("Re-ordering")
-  setorder(log2FCData, contrast_label, Gene_Name, aaPos, is_infinite, pvalue, -absLog2FC)
+  setorder(log2FCData, contrast_label, Gene_Name, aaPos,  # the grouping variables, sorted here for easy viewing
+           is_infinite, pvalue, -absLog2FC)  # the ranking variables
   #initialize to be safe
   message ("Adding column representative")
   log2FCData[,representative := FALSE]
