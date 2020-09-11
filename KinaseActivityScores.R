@@ -32,7 +32,38 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "../data/PSP&NetworKIN_Kina
 }
 
 kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv",
-                            plots=TRUE, outlierLog2FC = 10){
+                            plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE){
+  
+  
+  # deal with columns ... this is ugly ... can be improved
+  requiredColumns <- c("log2FC", "pos", "phSiteCombo")
+  if (requireAAMatch) requiredColumns <- c(requiredColumns, "aa")
+  if (uniprot){
+    requiredColumns <- c(requiredColumns, "uniprot")
+  }else{
+    requiredColumns <- c(requiredColumns, "Gene_Name")
+  }
+
+  missingColumns <- setdiff(requiredColumns, colnames(log2FCData))
+  if (length(missingColumns) > 0) stop (length(missingColumns), " missing column(s) ", paste0(missingColumns, collapse=", "), " in log2FCData  table")
+  
+  if (uniprot){
+    mergeXCols <- c("uniprot")
+    mergeYCols <- c("TARGET_UP_ID")
+  }else{
+    mergeXCols <- c("Gene_Name")
+    mergeYCols <- c("TARGET_GENE_NAME")
+  }
+  if(requireAAMatch){
+    mergeXCols <- c(mergeXCols, "aa")
+    mergeYCols <- c(mergeYCols, "TARGET_RES")
+  }
+  mergeXCols <- c(mergeXCols, "pos")
+  mergeYCols <- c(mergeYCols, "TARGET_POS")
+  
+  # done with columns
+  
+  
   
   if ("representative" %in% colnames(log2FCData) & any(log2FCData$representative == FALSE)){
     warning ("data.table includes a 'representative' column, but some are set to FALSE. Did you forget to pre-filter?")
@@ -52,8 +83,12 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
     if (plots) boxplot(cleanData$log2FC)
   }
   
-  kinaseMapped <- merge (cleanData, kinaseData, by.x=c("Gene_Name", "aa", "pos"), 
-                         by.y = c("TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS"))
+
+ 
+  kinaseMapped <- merge (cleanData, kinaseData, by.x=mergeXCols, by.y=mergeYCols)
+  
+  if (uniprot) kinaseMapped[, Gene_Name := uniprot]
+  if (! "aa" %in% colnames(kinaseMapped)) kinaseMapped[,aa := ""]
   
   if(plots){
     plot (density(cleanData[,log2FC]))
@@ -67,11 +102,12 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   fullMean <- mean(cleanData[,log2FC])
   
   # summarize per kinase, Z score based on standard error of the mean log2FC per kinase
-  scores <- kinaseMapped[,.(Z = (mean(log2FC) - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD, 
+  scores <- kinaseMapped[,.(Z = (unique(.SD)[,mean(log2FC)] - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD, 
                             N= length(unique(phSiteCombo)),#.N,  # don't double count when two sites are in the same peptide 
                             meanLog2FC  = mean(log2FC),
                             sites = paste(unique(paste(Gene_Name, paste0(aa, pos), sep="_")), collapse=",") ),  # 'unique' because some sites will occur multiple times in different phospho-combos
-                         by = CTRL_GENE_NAME]
+                         by = CTRL_GENE_NAME,
+                         .SDcols = c("phSiteCombo", "log2FC")]
   
   # p values.  2*pnorm... makes it two-tailed. This is different from KSEApp, but I think it is more appropriate here where we include both positive and negative effects
   scores[,pValue := 2*pnorm(-abs(Z), lower.tail= TRUE)]
@@ -88,8 +124,33 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
     print (p)
     p <- ggplot(scores, aes(x=meanLog2FC, y = -log10(fdr.BH), col = sqrt(N))) + geom_point() #+ scale_color_steps(low="white", high="navy", breaks=c(0,1,3,10,50,100,200)) + theme_classic()
     print (p)
+    
+    p <- BarplotKinaseActivities(scores, kinaseMapped, max_pValue = 0.05)
+    print (p)
+    p <- BarplotKinaseActivities(scores, kinaseMapped, max_pValue = 1.0)
+    print (p)
+    
   }
-  return (scores)
+  return (list(scores = scores, kinaseMapped = kinaseMapped))
+}
+
+BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 0.05){
+  b <- merge (scores, kinaseMapped, by = "CTRL_GENE_NAME")
+  
+  setorder(scores, Z)
+  kinasesSorted <- scores[,CTRL_GENE_NAME]
+  sigKinases <-  scores[pValue< max_pValue]$CTRL_GENE_NAME
+  
+  b[,CTRL_GENE_NAME := factor(CTRL_GENE_NAME, levels = kinasesSorted)]
+  
+  ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = Z, col = Z)) + 
+    geom_vline(xintercept=0.0, lty="dotted") + 
+    geom_jitter(width=0.0, height=0.1, col="black", alpha=0.5) +  
+    geom_boxplot( varwidth=FALSE, alpha=0.7,outlier.shape = NA) + 
+    scale_color_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
+    scale_fill_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
+    theme_classic()
+  
 }
 
 
