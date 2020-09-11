@@ -1,7 +1,8 @@
 library (data.table)
 
 
-simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn="bait", cutHeight = 0.99, broadest=TRUE){
+simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn="bait", 
+                                                      cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01){
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
     return (list (enrichResultsTable, data.frame()))
@@ -9,7 +10,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   setDT(enrichResultsTable); setDT(gmt)
   
   ##Select Significant Terms
-  target_overrep_sig <- enrichResultsTable[p.adjust < 0.05,]#qvalue < 0.01]
+  target_overrep_sig <- enrichResultsTable[p.adjust < max(max_pAdjust,0.05),]#qvalue < 0.01]
   
   ##Prepare Significant GO Term Jaccard Similarity Matrix
   sig_go_terms <- unique(target_overrep_sig$ID)
@@ -45,10 +46,10 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   #winners <- clusterInfo[,.SD[which(count == maxSet)], by = .(cluster, Bait)]  #keeps all ties...needs updating
   
   if (broadest){
-    winners <- clusterInfo[p.adjust < 0.01,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    winners <- clusterInfo[p.adjust < max_pAdjust,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
     message (length(unique(winners$ID)), " representative GO terms choosing the BROADEST significant term per GO-cluster per ", groupColumn)
   }else{
-    winners <- clusterInfo[p.adjust < 0.01,.SD[which.min(p.adjust),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    winners <- clusterInfo[p.adjust < max_pAdjust,.SD[which.min(p.adjust),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
     message (length(unique(winners$ID)), " representative GO terms choosing the MOST significant term per GO-cluster per ", groupColumn)
   }
   result <- enrichResultsTable[ID %in% winners$ID,]
@@ -120,7 +121,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                     grid.rect(x, y, width-lwd, height-lwd, gp = gpar(fill = fill, col = NA))
                                   }
                                   if (!is.na(counts.mat[i,j])){
-                                    color <- "white" #ifelse (main.mat[i,j] < 2, "grey", "white")
+                                    color <- ifelse (main.mat[i,j] < 2, "grey", "white") # "white" #
                                     grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col=color))
                                   }
                                 }, ...) #+1  # this makes it a list!
@@ -142,9 +143,9 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
-                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE,...){
+                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01,...){
   setorder(simplifiedEnrichTable, p.adjust)
-  bestTermPerBait <- simplifiedEnrichTable[p.adjust<0.01,.(ID=ID[1:topN]),by=groupColumn]
+  bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust,.(ID=ID[1:topN]),by=groupColumn]
   if(reduceRedundantsAcrossGroups){  
     #reduce redundant based on clusters in fullEnrichTable
     countsByID <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(geneCount  = length(unique(unlist(strsplit(geneID, "/"))))), by = .(ID, cluster)]
