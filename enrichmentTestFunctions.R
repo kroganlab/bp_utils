@@ -143,9 +143,9 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
-                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01,...){
+                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1, ...){
   setorder(simplifiedEnrichTable, p.adjust)
-  bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust,.(ID=ID[1:topN]),by=groupColumn]
+  bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
   if(reduceRedundantsAcrossGroups){  
     #reduce redundant based on clusters in fullEnrichTable
     countsByID <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(geneCount  = length(unique(unlist(strsplit(geneID, "/"))))), by = .(ID, cluster)]

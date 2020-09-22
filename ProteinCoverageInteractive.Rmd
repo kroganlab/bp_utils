@@ -18,6 +18,13 @@ library (R.utils) # required for reading gzip files in fread
 LoadPeptideSites = function(file){
   peptides = fread(file)[,.(protein = `Leading razor protein`, start = `Start position`, end = `End position`)]
   peptides = peptides[!substr(protein,1,3) %in% c("CON", "REV") ,]
+  if (any(!complete.cases(peptides))){
+    showNotification(sprintf("Missing values detected in %d rows", sum(!complete.cases(peptides))), type="warning")
+    #warning (sprintf("Missing values detected in %d rows", sum(!complete.cases(peptides)), basename(file)))
+    peptides <- peptides[complete.cases(peptides)]
+  }
+
+  
   sites = do.call(rbind.data.frame, 
                   lapply(1:nrow(peptides), 
                          function(i) {
