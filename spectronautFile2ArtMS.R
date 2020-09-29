@@ -170,6 +170,13 @@ convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM",
                        CAM = '([C])[[(]Carbamidomethyl \\(C\\)[])]',
                        MOX = '([M])[[(]Oxidation \\(M\\)[])]',
                        NAC =  '([A-Z_])[[(]Acetyl \\(Protein N-term\\)[])]')
+  
+  massFormats <- c(MOX = "(.)\\[15.9949\\]",
+                   CAM = "(.)\\[57.0215\\]",
+                   PH = "(.)\\[79.9663\\]",
+                   NAC = "n\\[42.0106\\](.)")
+  
+  
   artmsFormats <- list (PH='\\1\\(ph\\)',
                         UB='\\1\\(gl\\)',
                         CAM = '\\1\\(cam\\)',
@@ -181,6 +188,14 @@ convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM",
       result <- gsub(specFormats[[mod]], artmsFormats[[mod]], result)
     }else (stop("I don't know how to deal with requested mod: ", mod))
   }
+  
+  # mass of UB is not yet known...
+  for (mod in mods){
+    if (mod %in% names(specFormats)){
+      result <- gsub(massFormats[[mod]], artmsFormats[[mod]], result)
+    }else (message("I don't yet know how to deal with mod: ", mod))
+  }
+  
   return (result)
 }
 
