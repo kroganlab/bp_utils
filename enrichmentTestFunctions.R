@@ -209,7 +209,7 @@ return(gmt)
 
 
 
-loadKegg <- function (organism="mmu", keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
+loadKegg <- function (organism=c("hsa", "mmu")[1], keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
   KEGG <- clusterProfiler:::prepare_KEGG(organism, "KEGG", keyType)
   gmt <- rbindlist(lapply (KEGG$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
   gmt$description <- KEGG$PATHID2NAME[gmt$ont]

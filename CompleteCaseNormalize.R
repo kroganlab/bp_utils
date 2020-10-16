@@ -3,7 +3,7 @@
 # peptideDF is expected to be a table ready to pass to MSstats::dataProcess
 # it will be modified in place using data.table functions
 
-CompleteCaseNormalize.inPlace <- function(peptideDF){
+CompleteCaseNormalize.inPlace <- function(peptideDF, minIntensityQuantile = 0){
   if (!"data.table" %in% class (peptideDF)){
     setDT(peptideDF)
     data.frame.only <- TRUE
@@ -11,10 +11,13 @@ CompleteCaseNormalize.inPlace <- function(peptideDF){
     data.frame.only <- FALSE
   }
   
-  # make a dt of complete cases, by passing through a wide format
-  pepDF.wide <- dcast(peptideDF, ProteinName+PeptideSequence+PrecursorCharge~BioReplicate+Condition+Run, value.var="Intensity")
+  minIntensity <- quantile(peptideDF$Intensity, minIntensityQuantile)
+  
+  #make a dt of complete cases, by passing through a wide format
+  pepDF.wide <- dcast(peptideDF[Intensity > quantile(peptideDF$Intensity, minIntensityQuantile)],
+                      ProteinName+PeptideSequence+PrecursorCharge~BioReplicate+Condition+Run, value.var="Intensity")
   completeFeatures <- pepDF.wide[complete.cases(pepDF.wide), .(ProteinName, PeptideSequence, PrecursorCharge)]
-  message ("Normalizing based on intensities in ", length(completeFeatures), " complete features")
+  message ("Normalizing based on intensities in ", length(completeFeatures), " complete features (having intensity > ", minIntensity, " ")
   setkey (peptideDF, ProteinName, PeptideSequence, PrecursorCharge)
   completeLong <- peptideDF[completeFeatures]
   
@@ -36,7 +39,7 @@ CompleteCaseNormalize.inPlace <- function(peptideDF){
 
 
 
-NearlyCompleteCaseNormalize.inPlace <- function(peptideDF, require = 0.50){
+NearlyCompleteCaseNormalize.inPlace <- function(peptideDF, require = 0.50, minIntensityQuantile = 0){
   if (!"data.table" %in% class (peptideDF)){
     setDT(peptideDF)
     data.frame.only <- TRUE
@@ -44,12 +47,18 @@ NearlyCompleteCaseNormalize.inPlace <- function(peptideDF, require = 0.50){
     data.frame.only <- FALSE
   }
   
+  minIntensity <- quantile(peptideDF$Intensity, minIntensityQuantile)
+  
+  
   # make a dt of complete cases, by passing through a wide format
   totalRuns <- nrow(unique(peptideDF[,.(BioReplicate,Condition,Run)]))
   minRunsReq <- ceiling(totalRuns * require)
-  passingFeatures <- peptideDF[!is.na(Intensity),.N, by = .(ProteinName,PeptideSequence,PrecursorCharge)][N >= minRunsReq,.(ProteinName,PeptideSequence,PrecursorCharge) ]
+  passingFeatures <- peptideDF[!is.na(Intensity) & Intensity > minIntensityQuantile,
+                               .N,
+                               by = .(ProteinName,PeptideSequence,PrecursorCharge)
+                               ][N >= minRunsReq,.(ProteinName,PeptideSequence,PrecursorCharge) ]
 
-  message (nrow(passingFeatures), " features present in at least ", minRunsReq, " runs for normalization.")
+  message (nrow(passingFeatures), " features present in at least ", minRunsReq, " runs for normalization (having intensity > ", minIntensity, " ")
   completeLong <- peptideDF[passingFeatures, , on = .(ProteinName, PeptideSequence, PrecursorCharge)]
   
   overallMedian <- median (log2(completeLong$Intensity), na.rm=TRUE)
