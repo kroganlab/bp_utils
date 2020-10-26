@@ -19,10 +19,8 @@ library (stringr)
 # expected usage:
 # ######## QC usage ###############
 #  
-# artmsInput <- spectronautFile2ArtMS("spectronautOutputFile.tsv")
-# artmsQualityControlEvidenceBasic(artmsInput$evidence_file, artmsInput$keys_file)
-# 
-# do.call ("artmsQualityControlEvidenceBasic", artmsInput)
+# artmsInput <- spectronautFile2ArtMS("spectronautOutputFile.tsv", outFilePrefix = "artms/exp1")  # writing out files is required to get around a problem in artMS using in-memory data.tables
+# artmsQualityControlEvidenceBasic(artmsInput$config_data$files$evidence, artmsInput$config_data$files$keys)
 #
 # ##### artmsQuantification usage#######
 # artmsInput <- spectronautFile2ArtMS("experiment1SpectronautOutputFile.tsv", outFilePrefix = "artms/exp1")

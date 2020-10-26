@@ -32,8 +32,13 @@ globalInput <- spectronautFile2ArtMS(inputEvidenceFile,   # a path to a spectron
                 # 12Hr_Inf_MG132-12Hr_Mock_MG132
 ##########################################
 
+
+
 # if this is an AB dataset, we're ready to run artMSQuantification (skip this for UB):
 artmsQuantification(globalInput$config_file)
+
+# its also possible to just run QC instead:
+artmsQualityControlEvidenceBasic(globalInput$config_data$files$evidence, globalInput$config_data$files$keys)
 
 
 # if this is a UB dataset, do the further work of grouping peptides by UB sites:
