@@ -98,7 +98,11 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
     fwrite (keys, paths["keys.txt"], sep="\t")
     configData <- writeConfigFile(paths, artmsConfig)
     writeContrastFile(paths, keys, controlPattern = controlPattern, contrastPatterns = contrastPatterns)
-  } else paths <- c()
+  } else {
+    paths <- c()
+    configData <- NULL
+  }
+  
   
   invisible(list (evidence_file = evidence, 
                   keys_file = as.data.frame(keys), 
@@ -163,7 +167,7 @@ setModificationsColumns <- function (dt, site){
   invisible(dt)
 }
 
-convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC")){
+convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC"), convertMassFormats = FALSE){
   result <- specModSequence
   specFormats <- list (PH='([STY])[[(]Phospho \\(STY\\)[])]',
                        UB='(K)[[(]GlyGly \\(K\\)[])]',
@@ -189,11 +193,13 @@ convertModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM",
     }else (stop("I don't know how to deal with requested mod: ", mod))
   }
   
-  # mass of UB is not yet known...
-  for (mod in mods){
-    if (mod %in% names(specFormats)){
-      result <- gsub(massFormats[[mod]], artmsFormats[[mod]], result)
-    }else (message("I don't yet know how to deal with mod: ", mod))
+  if (convertMassFormats){
+    # mass of UB is not yet known...
+    for (mod in mods){
+      if (mod %in% names(massFormats)){
+        result <- gsub(massFormats[[mod]], artmsFormats[[mod]], result)
+      }else (message("I don't yet know how to deal with mod: ", mod))
+    }
   }
   
   return (result)
