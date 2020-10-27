@@ -19,7 +19,7 @@ loadKinaseData <- function (kinaseDataFile){
 }
 
 
-loadKinaseDataFromKSEAFile <- function (ksDataFile = "../data/PSP&NetworKIN_Kinase_Substrate_Dataset_July2016.csv.gz", networKIN.minScore = 5){
+loadKinaseDataFromKSEAFile <- function (ksDataFile = "./data/PSP&NetworKIN_Kinase_Substrate_Dataset_July2016.csv.gz", networKIN.minScore = 5){
   ksdata <- fread(ksDataFile)
   ksdata <- ksdata[networkin_score > networKIN.minScore]
   
@@ -31,7 +31,7 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "../data/PSP&NetworKIN_Kina
   return (ksdata[])
 }
 
-kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv",
+kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv.gz",
                             plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE){
   
   
@@ -134,23 +134,52 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   return (list(scores = scores, kinaseMapped = kinaseMapped))
 }
 
-BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 0.05){
-  b <- merge (scores, kinaseMapped, by = "CTRL_GENE_NAME")
+BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 1.0, max_fdr = 0.05, min_N = 2, sigKinases = NULL, reverse = FALSE){
+  by.col <- c("CTRL_GENE_NAME")
   
-  setorder(scores, Z)
-  kinasesSorted <- scores[,CTRL_GENE_NAME]
-  sigKinases <-  scores[pValue< max_pValue]$CTRL_GENE_NAME
+  if ("Label" %in% colnames(kinaseMapped)){
+    #expected in kinaseMapped, even with just 1 label
+    if ("Label" %in% colnames(scores)){
+      # if  we get here, make sure we are joining by Label
+      by.col <- c(by.col, "Label")
+    } else if(length(unique(kinaseMapped$Label)) != 1){
+      # we're going to ignore label, so make sure data is only from one Label
+      warning("Multiple Labels detected in kinaseMapped, but no Label information in scores.  You might be combining log2FC from multiple contrasts inappropriately: ", paste0(unique(kinaseMapped$Label), collpase = ", "))
+    }
+  }
+
+  b <- merge (scores, kinaseMapped, by = by.col)
+  
+  if (is.null(sigKinases)){
+    sigKinases <-  unique(scores[pValue< max_pValue & fdr.BH < max_fder & N >= min_N]$CTRL_GENE_NAME)
+  }
+  
+  scoreSummary <- scores[,.(meanZ = mean(Z, na.rm = TRUE)), by = CTRL_GENE_NAME]
+  setorder(scoreSummary, meanZ)
+  kinasesSorted <- scoreSummary[,CTRL_GENE_NAME]
+
   
   b[,CTRL_GENE_NAME := factor(CTRL_GENE_NAME, levels = kinasesSorted)]
   
-  ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = Z, col = Z)) + 
-    geom_vline(xintercept=0.0, lty="dotted") + 
+  if (reverse){
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = Z, col = Z)) + 
+      facet_wrap(facets = ~CTRL_GENE_NAME, ncol = 3)
+  }else{
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = Z, col = Z)) + 
+      facet_wrap(facets = ~Label, ncol = 3)
+    
+  }
+  p <- p +
+    geom_vline(xintercept=0.0, lty="dotted", col = "black") + 
     geom_jitter(width=0.0, height=0.1, col="black", alpha=0.5) +  
     geom_boxplot( varwidth=FALSE, alpha=0.7,outlier.shape = NA) + 
     scale_color_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
     scale_fill_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
     theme_classic()
   
+
+
+  return (p)
 }
 
 
@@ -176,13 +205,24 @@ BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 0.05){
 #       absLog2FC
 #       infiniteConflict TRUE/FALSE does this site with the contrast_label have infinite fold chnages in opposite directions
 #       representative   TRUE/FALSE should this row be selected to represent the site in the contrast
-
-chooseRepsInSiteLog2FCData <- function(log2FCData){
-  
+#
+#    columnRename = c(Gene_Name = "singleProtein")
+chooseRepsInSiteLog2FCData <- function(log2FCData, columnRename = NULL){
   reqColumns <- c("aaPos", "Gene_Name", "contrast_label")
+  
+  if  (!is.null(columnRename)){
+    if (any(!names(columnRename) %in% reqColumns)){
+      warning("Asking to rename a column to a non required column: ", paste0(columnRename, collapse = ", "), "\n",
+              "Required columns: ", paste0(reqColumns, collapse = ", "))
+      message (columnRename)
+    }
+    setnames(log2FCData, old = columnRename, new = names(columnRename), skip_absent = TRUE)
+  }
+  
   missingColumns <- setdiff(reqColumns, colnames(log2FCData))
   if(length(missingColumns) > 0){
-    stop("chooseRepsInSiteLog2FCData: required columns are missing: ", paste0(missingColumns, collapse = ", "))
+    stop("chooseRepsInSiteLog2FCData: required columns are missing: ", paste0(missingColumns, collapse = ", "), "\n",
+         "Make use of columnRename to rename an existing column")
   }
     
   #strategy is to sort by relevant data, then choose the top-ranked row after grouping by site
@@ -250,5 +290,60 @@ test__chooseRepsInSiteLog2FCData <- function(){
   chooseRepsInSiteLog2FCData (test)
   View(test)
 }
+
+
+
+
+# Next few functions prepare an artMS/Msstats PH results file for kinase activity mapping
+# deals with multiple proteins per row, multiple sites per protein
+
+# this handles splitting the site off of a protein, sepaarated by a single underscore
+# it should handle the possibility that there are other underscores in a protein name
+# it will not handle the case where there are two sites  (other than simply splitting off the last one)
+# example P789ASDF_S123_T125 will not split off both sites
+splitProtein_Site <- function (protein_site){
+  fullSplit <- strsplit (protein_site, "_")
+  rejoinProteinSplit <- lapply (fullSplit, 
+                                FUN = function(ss)
+                                {
+                                  lastI <- length(ss)
+                                  return(c(paste(ss[1:(lastI-1)], collapse="_"), ss[lastI]))
+                                })
+  return (data.table::transpose(rejoinProteinSplit))
+}
+
+singleSiteMapping <- function(phData, proteinColumn = "Protein"){
+  singleSiteMapping <- data.table (Protein = unique(phData[[proteinColumn]]))
+  singleSiteMapping <- singleSiteMapping[,.(singleSite = unlist(strsplit(Protein, split=";"))), by = Protein]
+  singleSiteMapping[,c("singleProtein", "aaAndPos"):=splitProtein_Site(singleSite)]
+  singleSiteMapping[,c("aa", "pos") := .(substr(aaAndPos, 1,1), as.integer(substr(aaAndPos, 2, stringr::str_length(aaAndPos))))]
+  return(singleSiteMapping[])
+}
+
+
+expandProteinToSingleSites <- function(data, proteinColumn = "Protein"){
+  singleSiteMap <- singleSiteMapping (data, proteinColumn)
+  return (merge (data, singleSiteMap, by.x=proteinColumn, by.y = "Protein", allow.cartesian=TRUE))
+}
+
+
+prepare_AMSS_ResultsFile <- function(resultsDT, column = "Protein"){
+  
+  expanded2SingleSites <- expandProteinToSingleSites(resultsDT, proteinColumn = column)
+  
+
+  expanded2SingleSites[, aaPos := aaAndPos]
+  expanded2SingleSites[, contrast_label := Label]
+  expanded2SingleSites[,phSiteCombo := Protein]
+  
+  chooseRepsInSiteLog2FCData(expanded2SingleSites, columnRename = c(Gene_Name = "singleProtein"))
+  
+  return (expanded2SingleSites[])
+}
+
+
+
+
+
 
 

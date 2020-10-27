@@ -46,8 +46,11 @@ library (stringr)
 #    to replace a group with a single protein. No such column exists (in the spectronaut files I've seen)
 #
 
-spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig = NULL, controlPattern = "Ctrl", contrastPatterns = NULL){
+spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig = NULL, controlPattern = NULL, contrastPatterns = NULL){
   sn <- fread (filePath)
+  
+  sn[,Condition := fixConditionNames(Condition)]
+  
   
   #bioreplicate needs to be unique across all conditions
   # make sure this is the case by pasting them together:
@@ -283,3 +286,27 @@ writeContrastFile <- function(paths, keys, controlPattern=NULL, contrastPatterns
   message (paste("\t", contrasts, collapse="\n"))
 }
 
+
+# a utility function to "fix" the condition names
+# possible problems:
+#  1) "-" signs. These are reserved for contrasts
+#  2) begins with a numeral
+fixConditionNames <- function (conditionNames){
+  if(any(grepl("-", conditionNames))){
+    message ("Negative signs, aka hyphens, detected in condition names.  These will be replaced with '_'") 
+    conditionNames <- gsub ("-", "_", conditionNames)
+  }
+  if (any(grepl("^[0-9]", conditionNames))){
+    message ("Condition names found that start with numerals.  This can cause problems with some artMS functions. Appending 'x.'")
+    conditionNames <- gsub ("^([0-9])", "x.\\1", conditionNames)
+  }
+  return(conditionNames)
+}
+
+
+.testFixConditionNames <- function(conditionNames = c("24hrInf-1", "LSD-20min"), 
+                                   fixed = c("x.24hrInf_1", "LSD_20min")){
+  stopifnot (all (suppressMessages(fixConditionNames(conditionNames)) == fixed))
+}
+
+.testFixConditionNames()
