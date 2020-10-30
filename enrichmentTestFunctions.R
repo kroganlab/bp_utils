@@ -94,7 +94,9 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              borderMM = 2,
                              brewerPalette = "Blues",
                              show_column_dend = FALSE,
-                             border = TRUE, ...){
+                             border = TRUE,
+                             max_pAdjust = 0.01,
+                             ...){
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
   colors <- Blues(100)
   
@@ -121,7 +123,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                     grid.rect(x, y, width-lwd, height-lwd, gp = gpar(fill = fill, col = NA))
                                   }
                                   if (!is.na(counts.mat[i,j])){
-                                    color <- ifelse (main.mat[i,j] < 2, "grey", "white") # "white" #
+                                    color <- ifelse (main.mat[i,j] < -log10(max_pAdjust), "grey", "white") # "white" #
                                     grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col=color))
                                   }
                                 }, ...) #+1  # this makes it a list!
@@ -193,7 +195,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   #ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
   
   
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, ...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
