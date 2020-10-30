@@ -36,6 +36,7 @@ downloadMouseIDDatMap <- function(saveFile = file.path(localDir,"data/mouse.unip
   idmap.dat <- fread ("ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping.dat.gz",
                             header=FALSE)
   setnames(idmap.dat, c("uniprot", "idType", "id"))
+  dir.create(dirname(saveFile), recursive=TRUE, showWarnings = FALSE)
   fwrite(idmap.dat, file=saveFile)
 }
 
@@ -55,6 +56,33 @@ loadMouseIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/mous
   }
   fread (path)
 }
+
+
+translateUniprot2String <- function (uniprots, species = "MOUSE"){
+  if (toupper(species) == "HUMAN"){
+    idMapper <- loadHumanIDDatMap()[idType == "STRING",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "MOUSE"){
+    idMapper <- loadMouseIDDatMap()[idType == "STRING",] #has columns uniprot,idType,id
+  }
+  setnames(idMapper, old=c("id"), new=c("geneName"))
+  idMapper[match(uniprots, uniprot), geneName]
+  
+}
+
+
+
+translateString2Uniprot <- function (stringIDs, species = "MOUSE"){
+  if (toupper(species) == "HUMAN"){
+    idMapper <- loadHumanIDDatMap()[idType == "STRING",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "MOUSE"){
+    idMapper <- loadMouseIDDatMap()[idType == "STRING",] #has columns uniprot,idType,id
+  }
+  setnames(idMapper, old=c("id"), new=c("string"))
+  message ("Double check non-redundancy filter is required...")
+  idMapper[,uniprot[1], by = string] # make 1 to 1
+  idMapper[match(stringIDs, string), uniprot]
+}
+
 
 
 
