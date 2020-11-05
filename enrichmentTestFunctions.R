@@ -22,7 +22,10 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
                                          dimnames=list(levels(gmt.subset$ont), 
                                                        levels(gmt.subset$gene)))
   
-  go_dist_mat <- dist(termByGeneMat, method="binary")
+  #go_dist_mat <- dist(termByGeneMat, method="binary")
+  # maybe this is faster?  I haven't clocked it
+  go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
+  
   hc <- hclust(go_dist_mat)
   
   clusters <- cutree(hc, h=cutHeight)
