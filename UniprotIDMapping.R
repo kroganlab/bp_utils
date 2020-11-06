@@ -86,7 +86,7 @@ translateString2Uniprot <- function (stringIDs, species = "MOUSE"){
 
 
 
-translateUniprot2GeneName <- function(uniprots, species="HUMAN"){
+translateUniprot2GeneName.datFile <- function(uniprots, species="HUMAN"){
   if (toupper(species) == "HUMAN"){
     idMapper <- loadHumanIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
   }else if (toupper(species) == "MOUSE"){
@@ -252,7 +252,10 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 translateUniprot2GeneName <- function(uniprots, species = "HUMAN"){
   if (species == "HUMAN"){
     geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
-  }else{
+  }else if (species == "MOUSE"){
+    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
+    
+  } else {
     stop("unrecognized species", species)
   }
   mapTable <- unique(data.table(uniprot = names(geneNames), gene = geneNames))
