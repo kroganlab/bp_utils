@@ -1,0 +1,101 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library (data.table)
+library (ComplexHeatmap)
+library (circlize)
+library (ggplot2)
+library (magrittr)
+
+
+today <- function(){
+  format(Sys.time(), "%Y_%m_%d")
+}
+DateFileName <- function(x){
+  name <-   paste0(today(), "_", x)
+  print (name)
+  return (name)
+}
+```
+
+# config
+Edit these two paths, then run all blocks of code in order.
+```{r}
+#the location on your computer where bp_utils can be found; clone or download from link at https://github.com/kroganlab
+githubKroganLab <- "~/UCSF/kroganlab"
+
+# output from artMS/MSstats phospho analysis
+results.txt <- "xiaofang/2020_10_26_lsd.run1_output/results.txt"
+
+```
+
+
+# Kinase analysis
+
+```{r}
+source(file.path(githubKroganLab,  "bp_utils" ,"KinaseActivityScores.R"))
+kinaseData <- loadKinaseData(file.path(githubKroganLab, "bp_utils", "data", "kinaseSiteList_BachmanGyoriSorger2019.csv.gz"))[]
+
+
+#load MSstats results data
+results <- fread (results.txt)
+
+# convert to single site info based on gene names
+source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
+results[,gene := multiUniprotSites2multiGeneSites(Protein)]
+singleSiteResults <- prepare_AMSS_ResultsFile(results, column = "gene")
+
+labels <- unique(singleSiteResults$Label)
+#kinAct <- kinaseActivity (expanded2SingleSites[Label == labels[4]])
+
+kinActList <- lapply (labels, FUN=function(lab){kinaseActivity(singleSiteResults[Label == lab & representative==TRUE],
+                                                               plots = FALSE,
+                                                               kinaseData = kinaseData)})
+names(kinActList) <- labels
+
+kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
+kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
+
+message ("Writing out kinase results to same directory as results.txt ", results.txt)
+fwrite (kinActFull.scores, gsub(".txt", ".kinaseSummaryScores.csv", results.txt))
+fwrite (kinActFull.mapped, gsub(".txt", "kinaseSubstrateData.csv", results.txt))
+
+```
+
+## Heatmap of significant kinases
+```{r}
+sigKinases <-  kinActFull.scores[fdr.BH < 0.2 & N >= 2, unique(CTRL_GENE_NAME)]
+
+sigKinase.mat.z <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "Z"),
+                              rownames = "CTRL_GENE_NAME")
+
+sigKinase.mat.N <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "N"),
+                                  rownames = "CTRL_GENE_NAME")
+
+
+Heatmap (sigKinase.mat.z, 
+         cluster_columns=TRUE, 
+         name = "Kinase Z Score",
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="_")[[1]],
+         col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
+         cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(sigKinase.mat.N[i,j])){
+                                    grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                })
+
+
+```
+
+
+## plots of individual kinase substrates
+
+
+```{r, fig.width=8, fig.height=8}
+BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases)
+
+BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases, reverse=TRUE)
+
+```
