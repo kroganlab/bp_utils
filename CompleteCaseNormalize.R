@@ -17,7 +17,7 @@ CompleteCaseNormalize.inPlace <- function(peptideDF, minIntensityQuantile = 0){
   pepDF.wide <- dcast(peptideDF[Intensity > quantile(peptideDF$Intensity, minIntensityQuantile)],
                       ProteinName+PeptideSequence+PrecursorCharge~BioReplicate+Condition+Run, value.var="Intensity")
   completeFeatures <- pepDF.wide[complete.cases(pepDF.wide), .(ProteinName, PeptideSequence, PrecursorCharge)]
-  message ("Normalizing based on intensities in ", length(completeFeatures), " complete features (having intensity > ", minIntensity, " ")
+  message ("Normalizing based on intensities in ", nrow(completeFeatures), " complete features (having intensity > ", minIntensity, " ")
   setkey (peptideDF, ProteinName, PeptideSequence, PrecursorCharge)
   completeLong <- peptideDF[completeFeatures]
   
