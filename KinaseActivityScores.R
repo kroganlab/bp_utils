@@ -112,6 +112,8 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   # p values.  2*pnorm... makes it two-tailed. This is different from KSEApp, but I think it is more appropriate here where we include both positive and negative effects
   scores[,pValue := 2*pnorm(-abs(Z), lower.tail= TRUE)]
   scores[, fdr.BH := p.adjust(pValue, method = "fdr")]  #fdr is alias for "BH" Benjamini & Hochberg
+  scores[,c("bgMean", "bgSD") := .(fullMean, fullSD)]
+  
   setorder(scores, pValue)
   
   if (plots){
@@ -134,7 +136,10 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   return (list(scores = scores, kinaseMapped = kinaseMapped))
 }
 
-BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 1.0, max_fdr = 0.05, min_N = 2, sigKinases = NULL, reverse = FALSE){
+BarplotKinaseActivities <- function(scores, kinaseMapped, 
+                                    max_pValue = 1.0, max_fdr = 1.0, min_N = 2,
+                                    sigKinases = NULL, reverse = FALSE,
+                                    useMonoFont = FALSE, useViolin = FALSE){
   by.col <- c("CTRL_GENE_NAME")
   
   if ("Label" %in% colnames(kinaseMapped)){
@@ -151,7 +156,11 @@ BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 1.0, max_
   b <- merge (scores, kinaseMapped, by = by.col)
   
   if (is.null(sigKinases)){
-    sigKinases <-  unique(scores[pValue< max_pValue & fdr.BH < max_fder & N >= min_N]$CTRL_GENE_NAME)
+    sigKinases <-  unique(scores[pValue< max_pValue & fdr.BH < max_fdr & N >= min_N]$CTRL_GENE_NAME)
+  }
+  
+  if (length(sigKinases) == 0){
+    return ("No significant kinases")
   }
   
   scoreSummary <- scores[,.(meanZ = mean(Z, na.rm = TRUE)), by = CTRL_GENE_NAME]
@@ -171,11 +180,18 @@ BarplotKinaseActivities <- function(scores, kinaseMapped, max_pValue = 1.0, max_
   }
   p <- p +
     geom_vline(xintercept=0.0, lty="dotted", col = "black") + 
-    geom_jitter(width=0.0, height=0.1, col="black", alpha=0.5) +  
-    geom_boxplot( varwidth=FALSE, alpha=0.7,outlier.shape = NA) + 
+    geom_jitter(width=0.0, height=0.1, col="black", alpha=0.5)
+  if (useViolin){
+    p <- p + geom_violin(scale = "area",  alpha=0.7) 
+  } else{
+    p <-  p + geom_boxplot( varwidth=FALSE, alpha=0.7,outlier.shape = NA)
+  }
+  p <- p + 
     scale_color_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
     scale_fill_gradient2(low = "blue", mid= "gray", high="red", midpoint=0.0) + 
-    theme_classic()
+    theme_classic() 
+  
+  if (useMonoFont) p <- p + theme(axis.text.y = element_text( size = 10, family = "mono"))
   
 
 
