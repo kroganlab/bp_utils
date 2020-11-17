@@ -1,0 +1,485 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+```{r}
+library (data.table)
+library (ComplexHeatmap)
+library (ggplot2)
+
+
+today <- function(){
+  format(Sys.time(), "%Y_%m_%d")
+}
+DateFileName <- function(x){
+  name <-   paste0(today(), "_", x)
+  print (name)
+  return (name)
+}
+```
+
+# Introduction
+
+Steps:
+
+1. "Save as..." file to a new meaningful name, including some indication of the data you're processing.
+2. Edit ` paths ` and ` contrastPatterns` in Configuration section below, including options in "Prepare for artMS".
+3. First run artMS/MSstats by running first four code blocks manually.
+4. Do something useful while waiting for MSstats to finish (cup of coffee, say hi to your kids/parents, pet your dog).
+5. Once MSstats is finished,  run the remaining blocks.  "Run All" from the Run menu is probably easiest.
+6. Inspect artMS quality control plots (in ` outputDirectory`) and the heatmap plots here for problems in the data.
+7. Optionally, use "Knit to PDF" to make a nice record of what is done. 
+
+Tips:
+
+1. Modify code as needed to make thresholds etc as you want them; and rerun individual code blocks or lines.
+2. Use `pdf` or `cairo_pdf` to make nice PDF files of individual plots suitable for figures. Some examples are included but commented out.
+
+
+
+
+# Configuration
+Edit these paths to control all process below. 
+
+```{r}
+#the location on your computer where bp_utils can be found; clone or download from link at https://github.com/kroganlab
+githubKroganLab <- "~/UCSF/kroganlab"
+
+# the input data from spectronaut, in "MSstats" format or similar
+spectronautPeptideFile <- "/Users/ben/Box/5HT2A data analysis/Phosphoproteomics/Spectronaut results_local 0.75/LSD_Phospho Report.xls"
+
+# most output will appear within here (all?--that's the goal)
+outputDirectory <- "~/UCSF/kroganlab/BenPolacco/random/xiaofang/"
+
+# most ouptut will have this as a prefix (all?--that's a goal)
+jobPrefix <- "lsd.run1"
+
+# a list of regular expressions to select the contrasts from the full all-by-all set.  
+# This will be used by the R function grep, so all regular expressions that it understands are allowed.
+# set to NULL for a non-redundant (A-B but not B-A) all-by-all set
+contrastPatterns <- c("LSD.*-LSD_0", "LSD.*-ACN_60")
+
+# path to the proteome fasta file that shouldl have all proteins mentioned in spectronaut.
+# used by artMS to get sequence positions for PTM
+referenceProteomeFasta <- "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz"
+
+# choose either PH or UB to match the data
+site.PH_or_UB <- "PH"
+
+
+
+# if you want to exclude runs or conditions, put them in these vectors
+# a new input file will be written with these runs/conditions excluded
+# here, run corresponds to Run column in the "spectronaut for MSstats" output
+# it is the "RawFile" column in the keys.txt file
+
+conditionsToSkip <- c("Ctrl_24Hr")
+runsToSkip <- c() #c("LP1_11_phos_DIA_124.raw")
+
+
+
+
+# don't change these (unless you know what you're doing):
+outFilePrefix <- file.path(outputDirectory, DateFileName(jobPrefix))
+originalWorkingDirectory <- getwd()
+
+if (length(conditionsToSkip) >0 | length(runsToSkip) > 0){
+  a <- fread (spectronautPeptideFile)
+  a <- a[ !(Condition %in% conditionsToSkip | Run %in% runsToSkip)]
+  
+  dir.create( outFilePrefix, showWarnings = FALSE)
+  spectronautPeptideFile <- file.path(outFilePrefix, "spectronaut_subset.csv")
+  fwrite (a, spectronautPeptideFile)
+  
+  }
+
+```
+
+
+## Prepare for artMS
+
+Some settings here in the `cf` list object
+
+```{r}
+source (file.path(githubKroganLab, "bp_utils", "spectronautFile2ArtMS.R"))
+
+cf<- list()
+# normalization method FALSE = no normalization; default is global medians which you can get my removing/commenting out the line
+cf$msstats$normalization_method = FALSE
+# should artms attempt to annotate proteins 1 = yes; 0 = no
+cf$output_extras$annotate$enabled <- as.integer(0)
+# should artms do extended QC 1 = yes; 0= no
+cf$qc$extended <- as.integer(1)
+
+
+```
+
+
+
+
+
+# run artMS,including QC and MSstats
+These steps have to be run manually.  `eval=FALSE` in their headings mean it won't be run while `knit`ting or by choosing "Run All". 
+
+## make files in artMS format
+```{r, eval = FALSE}
+globalInput <- spectronautFile2ArtMS(spectronautPeptideFile, outFilePrefix = outFilePrefix, artmsConfig = cf, contrastPatterns  = contrastPatterns)
+# If you don't like the contrasts, go back and change them now before proceeding.
+```
+
+```{r, eval = FALSE}
+if(site.PH_or_UB %in% c("PH", "UB")){
+  phosphoInput <- doSiteConversion (globalInput, referenceProteome = referenceProteomeFasta, site=site.PH_or_UB)
+}
+
+# artMS dumps a ton of files in current working directory.  Try to keep this clean by
+# changing working directory to the _output directory.  
+setwd(file.path(outFilePrefix, "output"))
+artmsQuantification (phosphoInput$config_file)
+setwd(originalWorkingDirectory)
+
+```
+
+
+# Reloading output from another day?
+
+My file naming puts today's date in filenames.  That is convenient to prevent you from later over-writing a previous day's work, but potentially it makes some of the functions below fail if you revisit on a later day because they may be looking for a file with today's date, but artMS/MSstats ran yesterday.
+
+```{r}
+# paths defined for the various files used in analyses below here:
+results.txt <- file.path(outFilePrefix, "output", "results.txt") 
+mss.normalized.txt <-file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
+protQuant.txt <- file.path(outFilePrefix, "output", "results_RunLevelData.txt") 
+
+previousDate <- "2020_10_26" # change this if you did the above on a different day and simply didn't rerun artMSQuantification
+
+# first try with today's date, if it fails use previousDate
+if(!file.exists ( results.txt) ){
+  outFilePrefix <- file.path(outputDirectory, sprintf("%s_%s", previousDate, jobPrefix ))
+  
+  results.txt <- file.path(outFilePrefix, "output",  "results.txt")
+  if(!file.exists ( results.txt) ){
+    stop("no results file found at ", results.txt)
+  }
+  
+  mss.normalized.txt <- file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
+  protQuant.txt <- file.path(outFilePrefix, "output",  "results_RunLevelData.txt") 
+}
+
+
+message ("using output files associated with ", results.txt)  
+```
+
+
+
+# Volcanoes
+
+
+```{r, fig.width=5, fig.height=7}
+results <- fread (results.txt)
+
+pvalueThreshold <- 0.05
+log2FCThreshold <- 1
+pvalueVariable <-  "adj.pvalue" # or "pvalue"
+
+
+results[,sig := "not"]
+results[results[[pvalueVariable]] < pvalueThreshold & abs(log2FC) > log2FCThreshold, sig := ifelse(log2FC  <0, "down", "up")]
+results[, yVariable := -log10(results[[pvalueVariable]])]
+
+p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) + 
+  geom_point(show.legend = FALSE, alpha = 0.5, size = 1, shape = 16) + 
+  facet_wrap (~Label) + 
+  scale_color_manual(values = c(down= "blue", not = "gray", up = "red")) +
+  #scale_x_continuous(limits = c(-4,4)) +
+  scale_y_continuous(name = paste(pvalueVariable, "(-log10)", collapse = "")) +
+  geom_hline(yintercept = -log10(pvalueThreshold), lty="dotted") +
+  geom_vline(xintercept = c(-1, 1) * log2FCThreshold, lty="dotted") + 
+  theme_bw() 
+
+
+print (p)
+
+
+results[,c("posGroup", "negGroup") := tstrsplit(Label, split = "-")]
+
+p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) + 
+  geom_point(show.legend = FALSE, alpha = 0.5, size = 1, shape = 16) + 
+  facet_grid(rows=vars(posGroup), cols = vars(negGroup)) + 
+  scale_color_manual(values = c(down= "blue", not = "gray", up = "red")) +
+  #scale_x_continuous(limits = c(-4,4)) +
+  scale_y_continuous(name = paste(pvalueVariable, "(-log10)", collapse = "")) +
+  geom_hline(yintercept = -log10(pvalueThreshold), lty="dotted") +
+  geom_vline(xintercept = c(-1, 1) * log2FCThreshold, lty="dotted") + 
+  theme_bw() 
+
+
+print (p)
+
+
+```
+
+
+
+
+# Do we trust normalization?
+
+```{r}
+#mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
+normPepInt <- fread (mss.normalized.txt)
+
+minTrustedIntensity <- 2^5
+observationCounts <- normPepInt[!is.na(INTENSITY) & INTENSITY > minTrustedIntensity,.N, by = PEPTIDE]
+
+ggplot (observationCounts, aes(x=N)) + geom_bar() +
+  xlab("Count runs") + ylab("Count peptide ions") +
+  labs(title = "How many peptide ions are detected in all/most runs?")
+
+# If there are enough complete cases, just look at those
+numRunsRequired <- max (observationCounts$N)
+# or choose another number close to complete:
+# numRunsRequired <- max (normPepInt[!is.na(INTENSITY),.N, by = PEPTIDE]$N) -2 
+completePeptideIons <- observationCounts[ N >= numRunsRequired,]$PEPTIDE
+
+ggplot (normPepInt[PEPTIDE %in% completePeptideIons], aes(x=interaction(GROUP_ORIGINAL, SUBJECT_ORIGINAL), y = ABUNDANCE)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = sprintf("%d peptide ions detected in at least %d runs with intensity > %d", length(completePeptideIons), numRunsRequired, minTrustedIntensity))
+        
+
+
+```
+
+
+
+# Heatmap view of peptide intensity
+```{r, fig.width =6, fig.height=12}
+#mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
+normPepInt <- fread (mss.normalized.txt)
+
+minTrustedIntensity <- 2^5
+normPepInt[INTENSITY < minTrustedIntensity, INTENSITY := NA]
+
+normPepInt[, logCenteredIntensity := log2(INTENSITY/(median(INTENSITY, na.rm=TRUE))), by = PEPTIDE]
+normInt.mat <- as.matrix(dcast(normPepInt, PEPTIDE~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "PEPTIDE")
+
+normInt.mat.noNA <- normInt.mat
+normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
+ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
+
+
+Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")))
+Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
+        cluster_columns = FALSE)
+
+```
+
+# Heatmap view of significant changers
+```{r, fig.width = 8, fig.height=12}
+
+#results.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results.txt") 
+results <- fread (results.txt)
+
+#protQuant.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results_RunLevelData.txt") 
+protQuant <- fread (protQuant.txt)
+source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
+protQuant[,gene := multiUniprotSites2multiGeneSites(Protein)]
+
+
+#subset to the significant proteins
+sigProteins <- results[abs(log2FC) > 1 & pvalue < 0.01,
+                       unique(Protein)]
+protQuant <- protQuant[Protein %in% sigProteins,]
+
+
+protQuant[, logCenteredIntensity := LogIntensities-median(LogIntensities, na.rm=TRUE), by = Protein]
+normInt.mat <- as.matrix(dcast(protQuant, gene~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "gene")
+
+normInt.mat.noNA <- normInt.mat
+normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
+ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
+
+
+Heatmap(normInt.mat, cluster_rows = ddr, 
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
+        show_row_names = TRUE,
+        row_names_gp = gpar(fontsize = 6))
+Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = TRUE,
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
+        cluster_columns = FALSE,
+        row_names_gp = gpar(fontsize = 6))
+
+
+```
+
+# PCA
+
+
+# Kinase analysis
+
+```{r}
+source(file.path(githubKroganLab,  "bp_utils" ,"KinaseActivityScores.R"))
+kinaseData <- loadKinaseData(file.path(githubKroganLab, "bp_utils", "data", "kinaseSiteList_BachmanGyoriSorger2019.csv.gz"))[]
+
+
+#load MSstats results data
+#results.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results.txt")
+results <- fread (results.txt)
+
+# convert to single site info based on gene names
+source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
+results[,gene := multiUniprotSites2multiGeneSites(Protein)]
+singleSiteResults <- prepare_AMSS_ResultsFile(results, column = "gene")
+
+labels <- unique(singleSiteResults$Label)
+#kinAct <- kinaseActivity (expanded2SingleSites[Label == labels[4]])
+
+kinActList <- lapply (labels, FUN=function(lab){kinaseActivity(singleSiteResults[Label == lab & representative==TRUE],
+                                                               plots = FALSE,
+                                                               kinaseData = kinaseData)})
+names(kinActList) <- labels
+
+kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
+kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
+
+kinaseSummaryScores.csv <- file.path(paste0(outFilePrefix, "_output", collapse=""), "kinaseSummaryScores.csv")
+kinaseSubstrateData.csv <- file.path(paste0(outFilePrefix, "_output", collapse=""), "kinaseSubstrateData.csv")
+message (sprintf("Writing kinase output files to\n\t%s\n\t%s", kinaseSummaryScores.csv, kinaseSubstrateData.csv))
+
+fwrite (kinActFull.scores, kinaseSummaryScores.csv)
+fwrite (kinActFull.mapped, kinaseSubstrateData.csv)
+
+```
+
+## Heatmap of significant kinases
+```{r}
+sigKinases <-  kinActFull.scores[fdr.BH < 0.2 & N >= 2, unique(CTRL_GENE_NAME)]
+
+sigKinase.mat.z <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "Z"),
+                              rownames = "CTRL_GENE_NAME")
+
+sigKinase.mat.N <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "N"),
+                                  rownames = "CTRL_GENE_NAME")
+
+
+Heatmap (sigKinase.mat.z, 
+         cluster_columns=TRUE, 
+         name = "Kinase Z Score",
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="_")[[1]],
+         col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
+         cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(sigKinase.mat.N[i,j])){
+                                    grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                })
+
+
+```
+
+
+## plots of individual kinase substrates
+
+
+```{r, fig.width=8, fig.height=8}
+BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases)
+
+BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases, reverse=TRUE)
+
+```
+
+# Enrichment analysis
+## Prepare sets of proteins from our data
+```{R}
+#load MSstats results data
+#results.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results.txt") 
+results <- fread (results.txt)
+results[,sig := "not"]
+results[pvalue < 0.01 & abs(log2FC) > 1, sig := ifelse(log2FC  <0, "down", "up")]
+
+source (file.path(githubKroganLab, "bp_utils", "KinaseActivityScores.R"))
+results <- expandProteinToSingleSites(results)
+
+source (file.path(githubKroganLab, "bp_utils", "UniprotIDMapping.R"))
+results[, gene := translateUniprot2GeneName(singleProtein, species = "HUMAN")]
+
+geneGroups <- unique(results[sig != "not" & is.finite(log2FC), .(gene, group = Label)])
+universe <- unique(results$gene)
+
+```
+
+
+## load gene ontology data
+```{R}
+source (file.path(githubKroganLab, "bp_utils", "enrichmentTestFunctions.R"))
+
+gmt <- loadGmtFromBioconductor(dbName = "org.Hs.eg.db", ontology = "ALL", keyType = "SYMBOL")
+gmt <- gmt[,.(ont = description, gene = gene)]
+
+```
+## run enrichment tests
+```{r}
+library (parallel)
+library (pbapply)
+library (clusterProfiler)
+
+groups <- unique(geneGroups$group)
+
+
+numProcessors <- 1
+# pblapply can use multiple processors if you set this above 1;
+# I have mixed results, it looks like there is a lot of overhead
+# you definitely don't want to max out your cores
+#numProcessors <- floor(parallel::detectCores()/2)
+
+message ("Computing enrichments on ", length(groups), " groups")
+enrichList <-  pblapply(groups, 
+                        function(g){
+                          setDT(as.data.frame(enricher(unique(geneGroups[group==g,gene]),
+                                                       pAdjustMethod="fdr",
+                                                       universe=universe,
+                                                       TERM2GENE = gmt,
+                                                       qvalueCutoff = 1.1,
+                                                       pvalueCutoff = 1.1)))
+                        },
+                        cl=numProcessors)
+names(enrichList) <- groups
+
+enrichTable <-  rbindlist(enrichList, idcol="group")
+```
+
+## simplify (remove redundancy between GO terms)
+```{r}
+simp <- simplifyEnrichBySimilarUniverseMembership(enrichTable, gmt, groupColumn="group",cutHeight = 0.99, broadest=FALSE, max_pAdjust = 0.1)
+
+```
+
+## plot
+```{r, fig.height=4, fig.width=8}
+
+a <- enrichHeatmapBestPerGroup(simp[[1]], simp[[2]],
+                          #cols = sort(c(negCols, posCols)),
+                          #negCols = negCols,
+                          groupColumn = "group",
+                          topN = 8,
+                          cluster_columns=FALSE, 
+                          reduceRedundantsAcrossGroups=TRUE,
+                          minCount = 1,
+                          max_pAdjust = 0.1)
+
+# to draw results to a file; you will want to play with height and width to get reasonably shaped plot
+# cairo_pdf("My_enrichment_heatmap_file.pdf", height=6, width=8)  # or replace cairo_pdf with pdf if you don't have cairo installed
+# draw (a$hmList)
+# dev.off()
+
+
+
+```
+
