@@ -31,8 +31,56 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "./data/PSP&NetworKIN_Kinas
   return (ksdata[])
 }
 
+
+
+
+
+
+
+# Compute enrichment scores based on gene set enrichment analysis.
+# uses data table structure that is built and returned by kinaseActivity
+kinaseActivity.sea <- function(kinaseMapped, nperm=1000, gseaWeightParam = 1, nproc=1, fullData = NULL, center = FALSE, ...){
+  stopifnot(length(unique(kinaseMapped$Label)) < 2) # we should only be computing this over a single label
+  
+  #collapse log2FC down to a single value per phSiteCombo
+  if(is.null(fullData)){
+  log2FC.table <-  kinaseMapped[is.finite(log2FC) & representative == TRUE, 
+                                   .(log2FC = unique(log2FC)), by = .(phSiteCombo)]
+  } else{
+    stopifnot(length(unique(fullData$Label)) < 2) # we should only be computing this over a single label
+    log2FC.table <- fullData[is.finite(log2FC) & representative == TRUE, 
+                             .(log2FC = unique(log2FC)), by = .(phSiteCombo)]
+  }
+  
+  #convert to a named vector
+  log2FC<-log2FC.table$log2FC
+  names(log2FC)<-log2FC.table$phSiteCombo
+  
+  if (center)
+    log2FC <- log2FC - median(log2FC)
+  
+  setsTable <- kinaseMapped[representative == TRUE, .(phSiteCombo=unique(phSiteCombo)), by = .(CTRL_GENE_NAME)]
+  sets <- split(setsTable$phSiteCombo,
+                setsTable$CTRL_GENE_NAME)
+  
+
+  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, nperm = nperm, gseaParam=gseaWeightParam, nproc = nproc, ...)
+  seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
+  return (seaRes)
+}
+
+
+
+
+
+
+
+
+
+
 kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv.gz",
-                            plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE){
+                            plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE, do.sea = FALSE,
+                            sea.center = FALSE, sea.weightParam = 1){
   
   
   # deal with columns ... this is ugly ... can be improved
@@ -111,8 +159,16 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   
   # p values.  2*pnorm... makes it two-tailed. This is different from KSEApp, but I think it is more appropriate here where we include both positive and negative effects
   scores[,pValue := 2*pnorm(-abs(Z), lower.tail= TRUE)]
-  scores[, fdr.BH := p.adjust(pValue, method = "fdr")]  #fdr is alias for "BH" Benjamini & Hochberg
+  scores[, sigScore := -log10(pValue) * ifelse(Z < 0, -1, 1) ]
+  scores[, fdr.BH := p.adjust(pValue, method = "fdr")]  #method=fdr is alias for "BH" Benjamini & Hochberg
   scores[,c("bgMean", "bgSD") := .(fullMean, fullSD)]
+  
+   
+  if (do.sea == TRUE){
+    seaScores <- kinaseActivity.sea(kinaseMapped, fullData = cleanData, center = sea.center, gseaWeightParam = sea.weightParam, nperm = 10000)
+    setnames(seaScores, old = c("pval", "padj"), new = paste0(c("pval", "padj"), ".sea"))
+    scores <- merge (scores, seaScores, by.x = c("CTRL_GENE_NAME"), by.y = c("pathway"),suffixes = c("", ".sea"), all = TRUE)
+  }
   
   setorder(scores, pValue)
   
@@ -139,7 +195,8 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
 BarplotKinaseActivities <- function(scores, kinaseMapped, 
                                     max_pValue = 1.0, max_fdr = 1.0, min_N = 2,
                                     sigKinases = NULL, reverse = FALSE,
-                                    useMonoFont = FALSE, useViolin = FALSE){
+                                    useMonoFont = FALSE, useViolin = FALSE,
+                                    useSEA = FALSE, reorder = TRUE){
   by.col <- c("CTRL_GENE_NAME")
   
   if ("Label" %in% colnames(kinaseMapped)){
@@ -156,27 +213,38 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
   b <- merge (scores, kinaseMapped, by = by.col)
   
   if (is.null(sigKinases)){
-    sigKinases <-  unique(scores[pValue< max_pValue & fdr.BH < max_fdr & N >= min_N]$CTRL_GENE_NAME)
+    if (useSEA){
+      sigKinases <-  unique(scores[pval.sea< max_pValue & padj.sea < max_fdr & size >= min_N]$CTRL_GENE_NAME)
+    }else{
+      sigKinases <-  unique(scores[pValue< max_pValue & fdr.BH < max_fdr & N >= min_N]$CTRL_GENE_NAME)
+    }
   }
   
   if (length(sigKinases) == 0){
     return ("No significant kinases")
   }
   
-  scoreSummary <- scores[,.(meanZ = mean(Z, na.rm = TRUE)), by = CTRL_GENE_NAME]
-  setorder(scoreSummary, meanZ)
-  kinasesSorted <- scoreSummary[,CTRL_GENE_NAME]
-
+  if (reorder == TRUE){
+    scoreSummary <- scores[,.(meanZ = mean(Z, na.rm = TRUE)), by = CTRL_GENE_NAME]
+    setorder(scoreSummary, meanZ)
+    if (useSEA){
+      scoreSummary <- scores[,.(meanNES = mean(NES, na.rm = TRUE)), by = CTRL_GENE_NAME]
+      setorder(scoreSummary, meanNES)
+    }
+    kinasesSorted <- scoreSummary[,CTRL_GENE_NAME]
+  }else kinasesSorted <- sigKinases
   
   b[,CTRL_GENE_NAME := factor(CTRL_GENE_NAME, levels = kinasesSorted)]
   
   if (reverse){
-    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = Z, col = Z)) + 
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = sigScore, col = sigScore)) + 
       facet_wrap(facets = ~CTRL_GENE_NAME, ncol = 3)
   }else{
-    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = Z, col = Z)) + 
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = sigScore, col = sigScore)) + 
       facet_wrap(facets = ~Label, ncol = 3)
-    
+  }
+  if (useSEA){
+    p <- p + aes(fill = sigScore.sea, col = sigScore.sea)
   }
   p <- p +
     geom_vline(xintercept=0.0, lty="dotted", col = "black") + 

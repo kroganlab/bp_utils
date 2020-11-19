@@ -40,6 +40,15 @@ downloadMouseIDDatMap <- function(saveFile = file.path(localDir,"data/mouse.unip
   fwrite(idmap.dat, file=saveFile)
 }
 
+downloadRatIDDatMap<- function(saveFile = file.path(localDir,"data/mouse.uniprot.idmap.dat.gz")){
+  
+  idmap.dat <- fread ("ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/RAT_10116_idmapping.dat.gz",
+                      header=FALSE)
+  setnames(idmap.dat, c("uniprot", "idType", "id"))
+  dir.create(dirname(saveFile), recursive=TRUE, showWarnings = FALSE)
+  fwrite(idmap.dat, file=saveFile)
+}
+
 loadMouseIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/mouse.uniprot.idmap.dat.gz")){
   createTime <- file.info(path)$ctime
   if (is.na(createTime)){
@@ -56,7 +65,22 @@ loadMouseIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/mous
   }
   fread (path)
 }
-
+loadRatIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/rat.uniprot.idmap.dat.gz")){
+  createTime <- file.info(path)$ctime
+  if (is.na(createTime)){
+    message ("Local ID mapping file doesn't exist at ", path, " reloading.")
+    reload = TRUE
+  }else {
+    fileAge <- Sys.time() - createTime
+    if (Sys.time() - file.info(path)$ctime > as.difftime(5, units="mins")){
+      message ("Local file is ", as.integer(fileAge), attr(fileAge, "units"), " old. Consider forcing a reload")
+    }
+  }
+  if (reload){
+    downloadRatIDDatMap (saveFile = path)
+  }
+  fread (path)
+}
 
 translateUniprot2String <- function (uniprots, species = "MOUSE"){
   if (toupper(species) == "HUMAN"){
@@ -91,6 +115,8 @@ translateUniprot2GeneName.datFile <- function(uniprots, species="HUMAN"){
     idMapper <- loadHumanIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
   }else if (toupper(species) == "MOUSE"){
     idMapper <- loadMouseIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "RAT"){
+    idMapper <- loadRatIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
   }
   setnames(idMapper, old=c("id"), new=c("geneName"))
   idMapper[match(uniprots, uniprot), geneName]
@@ -249,12 +275,16 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
   }
 }
 
-translateUniprot2GeneName <- function(uniprots, species = "HUMAN"){
+translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE){
+  if (useDatFile){
+    return(translateUniprot2GeneName.datFile(uniprots, species))
+  }
   if (species == "HUMAN"){
     geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
   }else if (species == "MOUSE"){
     geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
-    
+  }else if (species == "RAT"){
+    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
   } else {
     stop("unrecognized species", species)
   }
@@ -280,12 +310,12 @@ multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN"){
 }
 
 
-multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep = "_", species = "HUMAN"){
+multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep = "_", species = "HUMAN", useDatFile = FALSE, uniqueOnly = FALSE){
   mapper <- data.table(uniprotSites = unique(as.character(uniprotSites)))
   #expand to singleSite, 1 per row
   mapper <- mapper[,.(singleSite = unlist(strsplit(uniprotSites, split = sep))), by = uniprotSites]
   mapper[,c("uniprot", "site") := tstrsplit(singleSite, split = siteSep)]
-  mapper[,gene := translateUniprot2GeneName(uniprot, species)]
+  mapper[,gene := translateUniprot2GeneName(uniprot, species, useDatFile = useDatFile)]
   if (any(is.na(mapper$gene))){
     message (length(mapper[is.na(gene), unique(uniprot)]), " uniprots could not be mapped to genes (using their uniprot ID in gene column)")
     mapper[is.na(gene), gene := uniprot]
@@ -293,8 +323,11 @@ multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep =
   
   mapper[, singleGeneSite := paste(gene,site, sep = siteSep)]
   
+  if (uniqueOnly) f <- unique
+  else f <- identity
+  
   # collapse back to the combined uniprotSites
-  mapper <- mapper[,.(geneSite  = paste0(singleGeneSite, collapse = sep)), by = uniprotSites]
+  mapper <- mapper[,.(geneSite  = paste0(f(singleGeneSite), collapse = sep)), by = uniprotSites]
   
   toGenes <- data.table (uniprotSites)
   

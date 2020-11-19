@@ -3,6 +3,7 @@
 # with a little editing in phSiteToHumanSite_expanded is should be convertible easily to mouse or...
 
 library (data.table)
+library (stringr)
 
 # this handles splitting the site off of a protein, sepaarated by a single underscore
 # it should handle the possibility that there are other underscores in a protein name
@@ -47,7 +48,7 @@ packMultipleSitesPerProtein <- function (siteTable, byColumn="Protein", protColu
 phSiteToHumanSite_expanded <- function (Protein, mapTable, removeNonHumanGaps = TRUE, gaps=c("-")){
   #names in mapTable
   #TODO figure these out automatically or pass them in 
-  otherCols <- list(pos = "vervet_pos", aa = "vervet_aa", uniprot="vervet_uniprot") #change these to mouse...
+  otherCols <- list(pos = "other_pos", aa = "other_aa", uniprot="other_uniprot") #change these to mouse...
   humancols <- c(pos = "human_pos", aa = "human_aa", uniprot="human_uniprot")
   
   #prepare the Protein column by expanding  prot1_S12;prot1_T14;prot1_T16
@@ -87,8 +88,7 @@ phSiteToHumanSite <- function (Protein, mapTable){
 
 # results below is the output of a MSstats with Protein column like A134ASD_S123;A134ASD_S125 for example...
 # requires data.table setDT(results)
-
-sampleUsage <- function (results, siteMapperFile = "Phospho_Sites_Full_Mapping_GreenMonkey_Human.csv.gz", uniprotIDMapper = "HUMAN_9606_idmapping.dat.gz"){
+TranslateOtherSpeciesPhSite2Human <- function (results, siteMapperFile = "Phospho_Sites_Full_Mapping_GreenMonkey_Human.csv.gz", uniprotIDMapper = "HUMAN_9606_idmapping.dat.gz"){
   expandToHumanSites <- phSiteToHumanSite_expanded (results$Protein, mapTable = fread (siteMapperFile), )
   expandToHumanSites <- merge (results, expandToHumanSites, by = "Protein", all.x=TRUE, allow.cartesian=TRUE)
   
@@ -98,13 +98,13 @@ sampleUsage <- function (results, siteMapperFile = "Phospho_Sites_Full_Mapping_G
   
   setnames(expandToHumanSites, old="Protein", new="msstats.Protein")
 
-  expandToHumanSites <- merge (expandToHumanSites, humanIdMapper, by = "human_uniprot", all.x=TRUE)
-  
+
   if (!is.null(uniprotIDMapper)){
     humanIdMapper <- fread (uniprotIDMapper, header=FALSE)[V2 == "Gene_Name", .(V3,V1)]
     names(humanIdMapper) <- c("Gene_Name", "human_uniprot")
-    humanIdMapper <- humanIdMapper[,Gene_Name[1], by = human_uniprot] #get only 1 name per uniprot
+    humanIdMapper <- humanIdMapper[,.(Gene_Name = Gene_Name[1]), by = human_uniprot] #get only 1 name per uniprot
     expandToHumanSites <- merge (expandToHumanSites, humanIdMapper, by = "human_uniprot", all.x=TRUE)
   }
   expandToHumanSites
 }
+
