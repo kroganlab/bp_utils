@@ -48,24 +48,27 @@ Edit these paths to control all process below.
 githubKroganLab <- "~/UCSF/kroganlab"
 
 # the input data from spectronaut, in "MSstats" format or similar
-spectronautPeptideFile <- "/Users/ben/Box/5HT2A data analysis/Phosphoproteomics/Spectronaut results_local 0.75/LSD_Phospho Report.xls"
+spectronautPeptideFile <- NULL# "/Users/ben/Box/5HT2A data analysis/Phosphoproteomics/Spectronaut results_local 0.75/LSD_Phospho Report.xls"
+# if spectronautPeptidefile is set to NULL, set maxQuantFiles here...
+maxQuantEvFile <- "/Users/ben/Box/5HT2A data analysis/5-HT/Phospho/DDA/evidence.txt"
+keysFile <- "/Users/ben/Box/5HT2A data analysis/5-HT/Phospho/DDA/keys.txt"
 
 # most output will appear within here (all?--that's the goal)
 outputDirectory <- "~/UCSF/kroganlab/BenPolacco/random/xiaofang/"
 
 # most ouptut will have this as a prefix (all?--that's a goal)
-jobPrefix <- "lsd.run1"
+jobPrefix <- "HT5.PH.DDA"
 
 # a list of regular expressions to select the contrasts from the full all-by-all set.  
 # This will be used by the R function grep, so all regular expressions that it understands are allowed.
 # set to NULL for a non-redundant (A-B but not B-A) all-by-all set
-contrastPatterns <- c("LSD.*-LSD_0", "LSD.*-ACN_60")
+contrastPatterns <- NULL #c("LSD.*-LSD_0", "LSD.*-ACN_60")
 
 # path to the proteome fasta file that shouldl have all proteins mentioned in spectronaut.
 # used by artMS to get sequence positions for PTM
 referenceProteomeFasta <- "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz"
 
-# choose either PH or UB to match the data
+# choose either PH or UB to match the data, "AB" for abundance workflow
 site.PH_or_UB <- "PH"
 
 
@@ -75,7 +78,7 @@ site.PH_or_UB <- "PH"
 # here, run corresponds to Run column in the "spectronaut for MSstats" output
 # it is the "RawFile" column in the keys.txt file
 
-conditionsToSkip <- c("Ctrl_24Hr")
+conditionsToSkip <- c()#("Ctrl_24Hr")
 runsToSkip <- c() #c("LP1_11_phos_DIA_124.raw")
 
 
@@ -83,13 +86,15 @@ runsToSkip <- c() #c("LP1_11_phos_DIA_124.raw")
 
 # don't change these (unless you know what you're doing):
 outFilePrefix <- file.path(outputDirectory, DateFileName(jobPrefix))
+dir.create( outFilePrefix, showWarnings = FALSE)
+
 originalWorkingDirectory <- getwd()
 
 if (length(conditionsToSkip) >0 | length(runsToSkip) > 0){
+  if(is.null(spectronautPeptideFile)) stop("Not implemented for maxquant yet")
   a <- fread (spectronautPeptideFile)
   a <- a[ !(Condition %in% conditionsToSkip | Run %in% runsToSkip)]
   
-  dir.create( outFilePrefix, showWarnings = FALSE)
   spectronautPeptideFile <- file.path(outFilePrefix, "spectronaut_subset.csv")
   fwrite (a, spectronautPeptideFile)
   
@@ -112,6 +117,7 @@ cf$msstats$normalization_method = FALSE
 cf$output_extras$annotate$enabled <- as.integer(0)
 # should artms do extended QC 1 = yes; 0= no
 cf$qc$extended <- as.integer(1)
+cf$qc$basic <- as.integer(1)
 
 
 ```
@@ -125,7 +131,12 @@ These steps have to be run manually.  `eval=FALSE` in their headings mean it won
 
 ## make files in artMS format
 ```{r, eval = FALSE}
-globalInput <- spectronautFile2ArtMS(spectronautPeptideFile, outFilePrefix = outFilePrefix, artmsConfig = cf, contrastPatterns  = contrastPatterns)
+if(!is.null(spectronautPeptideFile)){
+  globalInput <- spectronautFile2ArtMS(spectronautPeptideFile, outFilePrefix = outFilePrefix, artmsConfig = cf, contrastPatterns  = contrastPatterns)
+  
+} else{
+  globalInput <- maxQuantFiles2ArtMS (maxQuantEvFile, keysFile, outFilePrefix = outFilePrefix, artmsConfig = cf, contrastPatterns  = contrastPatterns)
+}
 # If you don't like the contrasts, go back and change them now before proceeding.
 ```
 
@@ -137,10 +148,18 @@ if(site.PH_or_UB %in% c("PH", "UB")){
 # artMS dumps a ton of files in current working directory.  Try to keep this clean by
 # changing working directory to the _output directory.  
 setwd(file.path(outFilePrefix, "output"))
-artmsQuantification (phosphoInput$config_file)
+if(site.PH_or_UB %in% c("PH", "UB")){
+  artmsQuantification (phosphoInput$config_file)
+} else{
+  artmsQuantification (globalInput$config_file)
+  
+}
+
 setwd(originalWorkingDirectory)
 
 ```
+
+
 
 
 # Reloading output from another day?
@@ -225,13 +244,14 @@ print (p)
 
 
 # Do we trust normalization?
-
+Basic approach here is to look at the high intensity, consistently observed petides and ask if they look normalized based on medians.
+Edit minDisplayedIntensity to explore
 ```{r}
 #mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
 normPepInt <- fread (mss.normalized.txt)
 
-minTrustedIntensity <- 2^5
-observationCounts <- normPepInt[!is.na(INTENSITY) & INTENSITY > minTrustedIntensity,.N, by = PEPTIDE]
+minDisplayedIntensity <- 2^10
+observationCounts <- normPepInt[!is.na(INTENSITY) & INTENSITY > minDisplayedIntensity,.N, by = PEPTIDE]
 
 ggplot (observationCounts, aes(x=N)) + geom_bar() +
   xlab("Count runs") + ylab("Count peptide ions") +
@@ -246,7 +266,7 @@ completePeptideIons <- observationCounts[ N >= numRunsRequired,]$PEPTIDE
 ggplot (normPepInt[PEPTIDE %in% completePeptideIons], aes(x=interaction(GROUP_ORIGINAL, SUBJECT_ORIGINAL), y = ABUNDANCE)) +
   geom_boxplot() +
   theme(axis.text.x = element_text(angle = 90)) +
-  labs(title = sprintf("%d peptide ions detected in at least %d runs with intensity > %d", length(completePeptideIons), numRunsRequired, minTrustedIntensity))
+  labs(title = sprintf("%d peptide ions detected in at least %d runs with intensity > %d", length(completePeptideIons), numRunsRequired, minDisplayedIntensity))
         
 
 
@@ -259,6 +279,7 @@ ggplot (normPepInt[PEPTIDE %in% completePeptideIons], aes(x=interaction(GROUP_OR
 #mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
 normPepInt <- fread (mss.normalized.txt)
 
+# remove low intensity that we think are as good as missing values
 minTrustedIntensity <- 2^5
 normPepInt[INTENSITY < minTrustedIntensity, INTENSITY := NA]
 
@@ -273,10 +294,42 @@ ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
 Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
         name = "log2.norm.int",
         col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")))
+
+
 Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
         name = "log2.norm.int",
         col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
-        cluster_columns = FALSE)
+        cluster_columns = FALSE, row_title = sprintf("%d peptides", nrow(normInt.mat)))
+
+```
+
+
+
+
+```{r, fig.width =6, fig.height=12}
+#mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
+normPepInt <- fread (mss.normalized.txt)
+
+normPepInt[, logCenteredIntensity := log2(INTENSITY/(median(INTENSITY, na.rm=TRUE))), by = PEPTIDE]
+normInt.mat <- as.matrix(dcast(normPepInt, PEPTIDE~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "PEPTIDE")
+
+#optionally subset
+#normInt.mat <- normInt.mat[sample(nrow(normInt.mat), 1000),]  # select 1000 rows
+#or
+normInt.mat <- normInt.mat[complete.cases(normInt.mat),]  # select rows with no missing values
+
+normInt.mat.noNA <- normInt.mat
+normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
+ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
+
+
+Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")))
+Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
+        name = "log2.norm.int",
+        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
+        cluster_columns = FALSE, row_title = sprintf("%d peptides", nrow(normInt.mat)))
 
 ```
 
@@ -350,8 +403,8 @@ names(kinActList) <- labels
 kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
 kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
 
-kinaseSummaryScores.csv <- file.path(paste0(outFilePrefix, "_output", collapse=""), "kinaseSummaryScores.csv")
-kinaseSubstrateData.csv <- file.path(paste0(outFilePrefix, "_output", collapse=""), "kinaseSubstrateData.csv")
+kinaseSummaryScores.csv <- file.path(outFilePrefix, "output", "kinaseSummaryScores.csv")
+kinaseSubstrateData.csv <- file.path(outFilePrefix, "output", "kinaseSubstrateData.csv")
 message (sprintf("Writing kinase output files to\n\t%s\n\t%s", kinaseSummaryScores.csv, kinaseSubstrateData.csv))
 
 fwrite (kinActFull.scores, kinaseSummaryScores.csv)

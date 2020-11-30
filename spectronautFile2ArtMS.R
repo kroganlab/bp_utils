@@ -75,13 +75,13 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
   evidence <- sn[,.(RawFile=Run, 
                     Proteins=ProteinName, 
                     `Leading proteins` = ProteinName,# artmsProtein2SiteConversion requires with a space Leading.proteins = ProteinName, 
-                    Modified.sequence = convertModificationFormat(PeptideSequence), 
+                    `Modified.sequence` = convertModificationFormat(PeptideSequence), 
                     Charge = PrecursorCharge, 
                     Intensity,
                     
                     sequence = cleanModifiedSequence(PeptideSequence),
                     oxidation..m. = str_count(PeptideSequence, coll("[Oxidation (M)]")),
-                    missed.cleavages = countMissedCleavage(PeptideSequence, enzyme="trypsin"),
+                    Missed.cleavages = countMissedCleavage(PeptideSequence, enzyme="trypsin"),
                     type = "SPECTRONAUT", #should be MSMS, MULTI-MSMS, MULTI-SECPEP...
                     ms.ms.count = 99,
                     
@@ -159,10 +159,10 @@ setModificationsColumns <- function (dt, site){
   dt[,Modifications := ""]
   for (s in site){
     if (s == "PH"){
-      dt[grep ("\\(ph\\)", Modified.sequence),Modifications := paste (Modifications, "x Phospho")]
+      dt[grep ("\\(ph\\)", `Modified.sequence`),Modifications := paste (Modifications, "x Phospho")]
     } else if (s=="UB"){
       #stop ("setModificationsColumns, I still need to check how spectronaut identifies ubiquitination")
-      dt[grep ("\\(gl\\)", Modified.sequence),Modifications := paste (Modifications, "x GlyGly")]
+      dt[grep ("\\(gl\\)", `Modified.sequence`),Modifications := paste (Modifications, "x GlyGly")]
     } else stop ("setModificationsColumns, unknown site requested: ", site)
   }
   invisible(dt)
@@ -275,7 +275,7 @@ writeContrastFile <- function(paths, keys, controlPattern=NULL, contrastPatterns
     contrasts <- unique(unlist(lapply(contrastPatterns, function(pattern)grep(pattern, fullRedundantContrasts, value=TRUE))))
     
   }else{
-    contrasts <- unlist(lapply (conditions[conditions != max(conditions)], FUN=function(cond)(paste(cond, conditions[conditions > cond], sep="-"))))
+    contrasts <- unlist(lapply (conditions[conditions != min(conditions)], FUN=function(cond)(paste(cond, conditions[conditions < cond], sep="-"))))
     if (!is.null(controlPattern)){
       #keep only those that match controlPattern:
       contrasts <- grep(controlPattern, contrasts, value=TRUE)
@@ -310,3 +310,63 @@ fixConditionNames <- function (conditionNames){
 }
 
 .testFixConditionNames()
+
+
+
+
+
+
+
+
+#  maxQuant2ArtMS
+# technically not necessary, but this makes MaxQuant and spectronaut analysis parallel
+
+
+
+maxQuantFiles2ArtMS <- function (evidencePath, keysPath, outFilePrefix = NULL, artmsConfig = NULL, controlPattern = NULL, contrastPatterns = NULL){
+  keys <- fread (keysPath)
+  
+  keys[,Condition := fixConditionNames(Condition)]
+  
+  
+  #bioreplicate needs to be unique across all conditions
+  # make sure this is the case by pasting them together:
+  keys[,BioReplicate := paste (Condition, BioReplicate, sep=".")]
+  
+  # There's a bug in artMS where a numeric BioReplicate causes problems
+  # because the bioreplicate is used as a column header and data[[br]] ends up selecting columns
+  # by numeric index instead of by name.
+  # I work around this  here by making it a character vector always
+  if (is.numeric(keys$BioReplicate)){
+    keys[,BioReplicate := paste ("BioRep", BioReplicate, sep=".")]
+  }
+  
+  # for some artMS functiouns we need check.names = TRUE  
+  evidence <- fread (evidencePath , check.names=TRUE )
+  evidence[, `Modified.sequence` := convertModificationFormat(`Modified.sequence`)]
+  
+  # for protein2SiteConversion we need check.names =  FALSE for at least this column
+  setnames(evidence, old = "Leading.proteins", "Leading proteins")
+  
+
+  if (!is.null(outFilePrefix)){
+    paths <- makeOutFilePaths(outFilePrefix)
+    if (!dir.exists(dirname(paths["output/results.txt"]))){
+      dir.create(dirname(paths["output/results.txt"]), recursive=TRUE)
+    }
+    fwrite (evidence, paths["evidence.txt"], sep="\t")
+    fwrite (keys, paths["keys.txt"], sep="\t")
+    configData <- writeConfigFile(paths, artmsConfig)
+    writeContrastFile(paths, keys, controlPattern = controlPattern, contrastPatterns = contrastPatterns)
+  } else {
+    paths <- c()
+    configData <- NULL
+  }
+  
+  
+  invisible(list (evidence_file = evidence, 
+                  keys_file = as.data.frame(keys), 
+                  config_file = paths["config.yaml"],
+                  config_data = configData))
+}
+
