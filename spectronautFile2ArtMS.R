@@ -213,8 +213,12 @@ cleanModifiedSequence <- function (modSeq){
   return(modSeq)
 }
 
-makeOutFilePaths <- function (outFilePrefix){
+makeOutFilePaths <- function (outFilePrefix, newDir = TRUE){
   suffixes = c("config.yaml", "evidence.txt", "keys.txt", "output/results.txt", "contrast.txt")
+  
+  if (newDir == TRUE){
+    dir.create(outFilePrefix, recursive=TRUE, showWarnings = FALSE)
+  }
   
   if (dir.exists(outFilePrefix)){
     paths <- file.path(outFilePrefix, suffixes)    
