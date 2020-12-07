@@ -53,7 +53,7 @@ NearlyCompleteCaseNormalize.inPlace <- function(peptideDF, require = 0.50, minIn
   # make a dt of complete cases, by passing through a wide format
   totalRuns <- nrow(unique(peptideDF[,.(BioReplicate,Condition,Run)]))
   minRunsReq <- ceiling(totalRuns * require)
-  passingFeatures <- peptideDF[!is.na(Intensity) & Intensity > minIntensityQuantile,
+  passingFeatures <- peptideDF[!is.na(Intensity) & Intensity > minIntensity,
                                .N,
                                by = .(ProteinName,PeptideSequence,PrecursorCharge)
                                ][N >= minRunsReq,.(ProteinName,PeptideSequence,PrecursorCharge) ]

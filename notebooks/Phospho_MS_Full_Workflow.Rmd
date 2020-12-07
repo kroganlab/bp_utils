@@ -113,6 +113,10 @@ source (file.path(githubKroganLab, "bp_utils", "spectronautFile2ArtMS.R"))
 cf<- list()
 # normalization method FALSE = no normalization; default is global medians which you can get my removing/commenting out the line
 cf$msstats$normalization_method = FALSE
+
+#cf$msstats$normalization_method = "globalStandards"
+#cf$msstats$normalization_reference <-  "P38398"
+
 # should artms attempt to annotate proteins 1 = yes; 0 = no
 cf$output_extras$annotate$enabled <- as.integer(0)
 # should artms do extended QC 1 = yes; 0= no
