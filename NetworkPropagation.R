@@ -31,6 +31,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   
   heatToBeat <- propagatedHeat
   if (networkHeatOnly){
+    #remove self-heat
     heatToBeat <- propagatedHeat - heat.0 * diag(S_matrix)
   }
   
@@ -40,6 +41,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   message (now(), " Propagating permutation matrix")
   permutedHeats <- S_matrix %*% permutedColumns
   
+  # remove self-heat if requested to allow comparison of just network-propagated heats
   if (networkHeatOnly) permutedHeats <- permutedHeats - permutedColumns * diag(S_matrix)#sweep (permutedColumns, 1, diag(S_matrix), FUN = "*")
   
   message (now(), " Summarizing to p-values")

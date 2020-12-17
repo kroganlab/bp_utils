@@ -182,3 +182,62 @@ PCA.pepIntensity <- function(pepInt, doPrint  = TRUE, normalize = TRUE,
 }
 
 
+
+#  ARGUMENTS
+# evidenceDT: a data.table holding the contents of an evidence file
+# globalStandards: a character vector of one or more protein IDs
+# subsetRuns: a character vector of runs to include.  Useful if evidence file includes extra runs, in which case the result will exclude the extra runs. Leave NULL or empty to ignore. 
+
+#
+# USAGE :
+# library (data.table)
+# evidenceDT <- fread ("evidence.txt")
+# globalStandards <- "P38398"
+# cleanEv <- removeIncompleteGlobalStandardFeatures(evidenceDT, globalStandards)
+# fwrite (cleanEv, "clean.evidence.txt")
+
+
+removeIncompleteGlobalStandardFeatures <- function(evidenceDT, globalStandards, subsetRuns=NULL){
+  # make a copy or subset as needed
+  if (!is.null(subsetRuns) & length(subsetRuns) > 0){
+    message ("Will only return rows in subsetRuns")
+    evDT <- evidenceDT[`Raw file` %in% subsetRuns]
+  }else{
+    evDT <- copy (evidenceDT)
+  }
+  
+  #the global standard features
+  gsFeatures <- evDT[Proteins %in% globalStandards]
+  
+  # the set of full runs
+  fullRuns <- unique( evDT$`Raw file` )
+  
+  #presence table
+  presenceTable <- dcast (gsFeatures,`Modified sequence`+Charge+Proteins~`Raw file`,
+                          value.var = "Intensity",
+                          # insert NAs here for easy use of complete.casese below
+                          fun.aggregate = function(x)(if(length(x) > 0) length(x) else NA) )
+  
+  # did we get all runs:
+  if (length(setdiff(fullRuns, colnames(presenceTable))) > 0){
+    stop("global standards completely missing from ", paste0(setdiff(fullRuns, colnames(presenceTable)), collapse=", "))
+  }
+  
+  complete <- presenceTable[complete.cases(presenceTable)]
+  if (nrow(complete) == 0){
+    stop ("no global standard features are complete in all runs")
+  }
+  
+  message (sprintf("%d features are complete in all %d runs", nrow(complete), length(fullRuns)))
+  completeFeatureDT <- gsFeatures[complete[,.(`Modified sequence`, Charge, Proteins)],, on = c("Modified sequence", "Charge", "Proteins")]
+  message (sprintf ("Of %d global standard rows in evidence file, keeping %d global standard rows", nrow(gsFeatures), nrow(completeFeatureDT)))
+  
+  return (rbind (completeFeatureDT, evDT[!Proteins %in% globalStandards]))
+}
+
+
+
+
+
+
+
