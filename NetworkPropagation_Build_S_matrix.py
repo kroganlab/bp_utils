@@ -20,9 +20,9 @@ import time
 # TI  - Network propagation: a universal amplifier of genetic associations
 # JO  - Nature Reviews Genetics
 # 
-# This uses an S matrix (terminology from above paper) which is the transpose of 'inv_denom' used elsewhere in Krogan lab
+# This uses an S matrix (terminology from above paper) which is the transpose of 'inv_denom' used elsewhere in Krogan lab (see Mehdi's code)
 # to propagate with an S matrix do: S %*% heat_0
-# to propage with inverse_denom do: heat_0 %*% inv_denom * pr
+# to propagate with inverse_denom do: heat_0 %*% inv_denom * pr
 # Note:
 # ! Order around %*% matters and S includes the pr factor !
 # col sums of S = 1
