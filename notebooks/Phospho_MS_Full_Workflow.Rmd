@@ -111,8 +111,8 @@ Some settings here in the `cf` list object
 source (file.path(githubKroganLab, "bp_utils", "spectronautFile2ArtMS.R"))
 
 cf<- list()
-# normalization method FALSE = no normalization; default is global medians which you can get my removing/commenting out the line
-cf$msstats$normalization_method = FALSE
+# normalization method FALSE = no normalization; default is global medians which you can get my removing/commenting out all normalization lines
+# cf$msstats$normalization_method = FALSE
 
 #cf$msstats$normalization_method = "globalStandards"
 #cf$msstats$normalization_reference <-  "P38398"
