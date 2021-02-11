@@ -156,7 +156,14 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmo
 }
 
 setModificationsColumns <- function (dt, site){
-  dt[,Modifications := ""]
+  if ("Modifications" %in% colnames(dt)){
+    message ("Evidence table already contains Modifications column. Likely this is MaxQuant output already")
+    message (paste0(unique(dt$Modifications), collapse = ";"))
+    invisible(dt)
+  }else{
+    message ("Initializing modifications column")
+    dt[,Modifications := ""]
+  }
   for (s in site){
     if (s == "PH"){
       dt[grep ("\\(ph\\)", `Modified.sequence`),Modifications := paste (Modifications, "x Phospho")]

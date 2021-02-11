@@ -5,7 +5,7 @@ loadKinaseData <- function (kinaseDataFile = NULL){
     message ("path to kinaseDataFile is required")
     message ("consider downloading from https://www.biorxiv.org/content/biorxiv/early/2019/11/06/822668.1/DC1/embed/media-1.zip?download=true")
     message ("Should also be available in bp_utils/data/kinaseSiteList_BachmanGyoriSorger2019.csv")
-    stop(".")
+    stop()
   }
   
   #download file from https://www.biorxiv.org/content/10.1101/822668v3.supplementary-material

@@ -29,6 +29,17 @@ loadHumanIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/huma
 }
 
 
+ensembl2gene <- function(){
+  stop("not implemented yet, see comment below for a start")
+}
+# ids <- loadHumanIDDatMap()
+# up2gene <- ids[idType == "Gene_Name",.(uniprot, gene = id)]
+# up2ensembl <- ids[idType == "Ensembl", .(uniprot, ensembl = id)]
+# 
+# ensembl2gene <- merge (up2ensembl, up2gene, by = "uniprot")
+# ensembl2gene <- ensembl2gene[,.(uniprots = paste0(uniprot, collapse = ";")), by = .(ensembl, gene)]
+
+
 ##########
 
 # mouse uniprot data file ####
@@ -146,6 +157,10 @@ translateEntrez2Uniprot <- function(entrez, species="HUMAN"){
   }
   subset[match(entrez, geneID), uniprot]
 }
+
+
+
+
 
 
 # using uniprot selected file resources ####
@@ -298,12 +313,19 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
 }
 
 
-multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN"){
+multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE){
   toGenes <- data.table(uniprots = uniprots)
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
   toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species)]
   toGenes[is.na(singleGene), singleGene := singleUniprot]
-  toGenes <- toGenes[, .(genes = paste(singleGene, collapse=sep)), by = uniprots]
+  if (simplify == TRUE){
+    simplify = function(x)unique(sort(x))
+  }else if (simplify == FALSE){
+    simplify = identity # do nothing
+  }else if (! "function" %in% class (simplify)){
+    stop("unexpected simplify format")
+  }
+  toGenes <- toGenes[, .(genes = paste(simplify (singleGene), collapse=sep)), by = uniprots]
   setkey(toGenes, uniprots)
   
   return(toGenes[uniprots, genes])

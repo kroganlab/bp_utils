@@ -56,6 +56,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
     message (length(unique(winners$ID)), " representative GO terms choosing the MOST significant term per GO-cluster per ", groupColumn)
   }
   result <- enrichResultsTable[ID %in% winners$ID,]
+  result[clusterInfo, cluster.id := cluster, on = "ID"]
   list(simplified = result, clusterInfo = clusterInfo)
 }
 
@@ -126,7 +127,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                     grid.rect(x, y, width-lwd, height-lwd, gp = gpar(fill = fill, col = NA))
                                   }
                                   if (!is.na(counts.mat[i,j])){
-                                    color <- ifelse (main.mat[i,j] < -log10(max_pAdjust), "grey", "white") # "white" #
+                                    color <- ifelse (abs(main.mat[i,j]) < -log10(max_pAdjust), "grey", "white") # "white" #
                                     grid.text(sprintf("%.0f", counts.mat[i, j]), x, y, gp = gpar(fontsize=10, col=color))
                                   }
                                 }, ...) #+1  # this makes it a list!

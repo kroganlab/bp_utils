@@ -137,7 +137,7 @@ PCA.pepIntensity <- function(pepInt, doPrint  = TRUE, normalize = TRUE,
   rowInfo[,rn := paste(Condition, Run, sep="-")]
   
   if (is.null(runLabels)){
-    rowInfo[,runLabel := BioReplicate]
+    rowInfo[,runLabel := Run]
   } else {
     stopifnot (all (rowInfo$Run %in% runLabels$Run) )
     rowInfo[runLabels, runLabel := label,on= "Run"]
@@ -151,10 +151,10 @@ PCA.pepIntensity <- function(pepInt, doPrint  = TRUE, normalize = TRUE,
   }
   
   if (is.null(conditionShapes)){
-    rowInfo[,shape := 1] 
+    rowInfo[,shapeLabel := ""] 
   }else{
     stopifnot (all (rowInfo$Condition %in% conditionShapes$Condition) )
-    rowInfo[conditionShapes, shape := i.shape,on= "Condition"]
+    rowInfo[conditionShapes, shapeLabel := shapeLabel,on= "Condition"]
   }
   
   pcaDT <- merge (pcaDT, rowInfo, by = c("rn"))
@@ -168,7 +168,7 @@ PCA.pepIntensity <- function(pepInt, doPrint  = TRUE, normalize = TRUE,
   
   
   #plot first two components
-  p <- ggplot (pcaDT, aes(x=PC1, y=PC2, col=conditionLabel, shape = shape)) + 
+  p <- ggplot (pcaDT, aes(x=PC1, y=PC2, col=conditionLabel, shape = shapeLabel)) + 
     geom_point(alpha=1.0, size=4) + 
     ggrepel::geom_text_repel(aes(label=runLabel), show.legend = FALSE) +
     theme_bw() + 
@@ -196,7 +196,7 @@ PCA.pepIntensity <- function(pepInt, doPrint  = TRUE, normalize = TRUE,
 # cleanEv <- removeIncompleteGlobalStandardFeatures(evidenceDT, globalStandards)
 # fwrite (cleanEv, "clean.evidence.txt")
 
-
+# end PCA ####
 removeIncompleteGlobalStandardFeatures <- function(evidenceDT, globalStandards, subsetRuns=NULL){
   # make a copy or subset as needed
   if (!is.null(subsetRuns) & length(subsetRuns) > 0){
@@ -237,6 +237,37 @@ removeIncompleteGlobalStandardFeatures <- function(evidenceDT, globalStandards, 
 
 
 
+# Ties in PTM probabilities ####
+
+# usage example based on a maxquant evidence file (ev.ub) with ubiquitination columns:
+# noTies <- NoTiesInPtmProbabilities (ev.ub$GlyGly..K..Probabilities, ev.ub$Sequence, ev.ub$GlyGly..K.)
+# message ("There are ", sum(!noTies), " features with ambiguous peptide localization probabilities, discarding")
+# ev.ub <- ev.ub[noTies]
+
+
+
+NoTiesInPtmProbabilities <- function(ptmProbs, unmodSeqs, ptmCounts){
+  #ptmProbs <- ev.ub$GlyGly..K..Probabilities
+  seqProbParts <- strsplit(ptmProbs, split="[()]")
+  seqParts <- lapply (seqProbParts, FUN = function(x)x[seq(from = 1, to = length(x), by = 2)])  # the odd-numbered indeces
+  
+  sequences <- sapply (seqParts, paste0, collapse="")  # for error checking
+  stopifnot(all(sequences == unmodSeqs))
+  
+  
+  probParts <- lapply (seqProbParts, FUN = function(x)as.numeric(x[seq(from = 2, to = length(x), by = 2)])) # the even indeces
+  
+  noTies <- rep(FALSE, length(probParts))
+  for (i in 1:length(noTies)){
+    #tricky code here
+    # Basically we look for ties in the N-top ranked probabilities, wher eN is number of PTM
+    # we do this by the use of rank, and look for patterns like 1,1,3  or in the case of N=2, things like 1,2,2,4 etc...
+    # in short, we count how many ranks <= N are present, and make sure that count is N 
+    noTies[i] <- sum(rank(-probParts[[i]], ties.method="min")  <= ptmCounts[i]) == ptmCounts[i]
+  }
+  
+  return(noTies)
+}
 
 
 
