@@ -105,8 +105,128 @@ translateUniprot2String <- function (uniprots, species = "MOUSE"){
 }
 
 
+# string data from string ####
 
-translateString2Uniprot <- function (stringIDs, species = "MOUSE"){
+# ... arguments passed to fread (url)
+readLocalVersionOfRemoteFile<- function(localPath, url, reload = FALSE, ...){
+  createTime <- file.info(localPath)$ctime
+  if (is.na(createTime)){
+    message ("Local ID mapping file doesn't exist at ", localPath, " reloading.")
+    reload = TRUE
+  }else {
+    fileAge <- Sys.time() - createTime
+    if (Sys.time() - file.info(localPath)$ctime > as.difftime(5, units="mins")){
+      message ("Local file is ", as.integer(fileAge), attr(fileAge, "units"), " old. Consider forcing a reload")
+    }
+  }
+  if (reload){
+    message ("Downloading ID mapping file to save locally")
+    message ("remote: ", url)
+    message ("local:  ", localPath)
+    remoteDT <- fread (url, ...)
+    dir.create(dirname(localPath), recursive=TRUE, showWarnings = FALSE)
+    fwrite (remoteDT, localPath)
+  }
+  fread (localPath)
+}
+
+
+loadStringToUniprotFile <- function (species, dataDir = file.path(localDir, "data"), reload = FALSE){
+  if(toupper(species) == "MOUSE"){
+    url <- "https://string-db.org/mapping_files/uniprot/mouse.uniprot_2_string.2018.tsv.gz"
+  } else if (toupper(species)  == "HUMAN"){
+    url <- "https://string-db.org/mapping_files/uniprot/human.uniprot_2_string.2018.tsv.gz"
+  }
+  fileName <- basename(url)
+  # try loading locally
+  localFilePath <- file.path(dataDir, fileName)
+  string2Uniprot.dt <- readLocalVersionOfRemoteFile (localFilePath, url, reload)
+  
+  setnames(string2Uniprot.dt, new = c("speciesID", "upAcc", "string", "pid", "length")) # those last 2 are guesses
+  string2Uniprot.dt[, c("uniprot", "uniprotName") := tstrsplit(upAcc, split = "\\|")]
+  return (string2Uniprot.dt)
+    
+}
+
+
+
+# using string data
+translateString2Uniprot <- function (stringIDs, species  = "MOUSE", fillMissing = TRUE, reload=FALSE){
+  idMapper <- loadStringToUniprotFile (species, reload = reload)
+  setkey(idMapper, string)
+  matched <- idMapper[stringIDs,.(string, uniprot)]
+  if(fillMissing == TRUE)
+    matched[is.na(uniprot), uniprot := string]
+  return (matched$uniprot)
+}
+
+
+loadString2EntrezFile <- function (species, dataDir = file.path(localDir, "data"), reload = FALSE){
+  if(toupper(species) == "MOUSE"){
+    url <- "https://string-db.org/mapping_files/entrez/mouse.entrez_2_string.2018.tsv.gz"
+  } else if (toupper(species)  == "HUMAN"){
+    url <- "https://string-db.org/mapping_files/entrez/human.entrez_2_string.2018.tsv.gz"
+  }
+  fileName <- basename(url)
+  # try loading locally, and reload if necessary or requested
+  localFilePath <- file.path(dataDir, fileName)
+  string2Entrez.dt <- readLocalVersionOfRemoteFile (localFilePath, url, reload)
+  
+  setnames(string2Entrez.dt, new = c("speciesID",  "entrez", "string")) 
+  return (string2Entrez.dt)
+}
+
+
+loadString2GeneFile <- function (species, dataDir = file.path(localDir, "data"), reload = FALSE){
+  if(toupper(species) == "MOUSE"){
+    url <- "https://string-db.org/mapping_files/STRING_display_names/mouse.name_2_string.tsv.gz"
+  } else if (toupper(species)  == "HUMAN"){
+    url <- "https://string-db.org/mapping_files/STRING_display_names/human.name_2_string.tsv.gz"
+  }
+  fileName <- basename(url)
+  # try loading locally, and reload if necessary or requested
+  localFilePath <- file.path(dataDir, fileName)
+  string2Gene.dt <- readLocalVersionOfRemoteFile (localFilePath, url, reload)
+  
+  setnames(string2Gene.dt, new = c("speciesID", "gene", "string")) # those last 2 are guesses
+  #string2Uniprot.dt[, c("uniprot", "uniprotName") := tstrsplit(upAcc, split = "\\|")]
+  return (string2Gene.dt)
+}
+
+
+
+translateString2Gene <- function (stringIDs, species = "MOUSE", fillMissing = TRUE, reload = FALSE){
+  idMapper <- loadString2GeneFile (species, reload = reload)
+  setkey(idMapper, string)
+  matched <- idMapper[stringIDs,.(string, gene)]
+  if(fillMissing == TRUE)
+    matched[is.na(gene), gene := string]
+  return (matched$gene)
+  
+}
+
+translateGene2String <- function (geneNames, species = "MOUSE", fillMissing = TRUE, reload = FALSE){
+  idMapper <- loadString2GeneFile (species, reload = reload)
+  setkey(idMapper, gene)
+  matched <- idMapper[geneNames,.(string, gene)]
+  if(fillMissing == TRUE)
+    matched[is.na(string), string := gene]
+  return (matched$string)
+}
+
+
+translateEntrez2String <- function (entrezNumbers, species = "MOUSE", fillMissing = TRUE, reload = FALSE){
+  idMapper <- loadString2EntrezFile (species, reload = reload)
+  setkey(idMapper, entrez)
+  matched <- idMapper[entrezNumbers,.(string, entrez)]
+  if(fillMissing == TRUE)
+    matched[is.na(string), string := entrez]
+  return (matched$string)
+}
+
+
+# . ####
+translateString2Uniprot.usingUniprotData <- function (stringIDs, species = "MOUSE"){
   if (toupper(species) == "HUMAN"){
     idMapper <- loadHumanIDDatMap()[idType == "STRING",] #has columns uniprot,idType,id
   }else if (toupper(species) == "MOUSE"){
@@ -290,7 +410,7 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
   }
 }
 
-translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE){
+translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE){
   if (useDatFile){
     return(translateUniprot2GeneName.datFile(uniprots, species))
   }
@@ -307,10 +427,41 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
   setkey(mapTable, "uniprot")
   # this orders all and expands the missing cases
   mapTable <- mapTable[uniprots]
-  # where gene lookup failed, assign the original uniprot
-  mapTable[is.na(gene), gene := uniprot]
+  if(fillMissing == TRUE){
+    # where gene lookup failed, assign the original uniprot
+    mapTable[is.na(gene), gene := uniprot]
+  }
   return (mapTable$gene)
 }
+
+
+
+translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing = FALSE){
+
+  if (species == "HUMAN"){
+    dbName <- org.Hs.eg.db::org.Hs.eg.db
+  }else if (species == "MOUSE"){
+    dbName <- org.Mm.eg.db::org.Mm.eg.db
+  }else if (species == "RAT"){
+    dbName <- org.Rn.eg.db::org.Rn.eg.db
+  } else {
+    stop("unrecognized species", species)
+  }
+  uniprots <- AnnotationDbi::mapIds(dbName, unique(geneNames), 'UNIPROT', 'SYMBOL', multiVals == "first")
+  mapTable <- unique(data.table(gene = names(uniprots), uniprot = uniprots))
+  setkey(mapTable, "gene")
+  # this orders all and expands the missing cases
+  mapTable <- mapTable[geneNames]
+  if (fillMissing == TRUE){
+    # where gene lookup failed, assign the original uniprot
+    mapTable[is.na(uniprot), uniprot := geneName]
+  }
+  return (mapTable$uniprot)
+}
+
+
+
+
 
 
 multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE){
@@ -355,3 +506,33 @@ multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep =
   
   return(mapper[toGenes,,on="uniprotSites"]$geneSite)
 }
+
+
+
+# gene aliases
+
+
+# useful to make sure the same gene symbol is used when combining different datasets
+
+geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN"){
+# if (FALSE == require (limma)  )
+#   return (geneAliases)
+  if (species == "HUMAN")
+    speciesCode <- "Hs"
+  else if (species == "MOUSE")
+    speciesCode <- "Mm"
+  else
+    speciesCode <- species
+  
+  unique.genes <- unique(geneAliases)
+  aliasTable <- data.table (alias = unique.genes, symbol = limma::alias2SymbolTable(unique.genes, species = speciesCode) )
+  message ("Of ", length(unique.genes), " unique genes, ",
+           aliasTable[alias != symbol & !is.na(symbol), length(alias)],
+           " will be replaced with official symbols, and ",
+           aliasTable[is.na(symbol), length(alias)], " were not found in alias table") 
+  
+  aliasTable[is.na(symbol), symbol := alias]
+  setkey(aliasTable, alias)
+  return (aliasTable[geneAliases,]$symbol)
+}
+
