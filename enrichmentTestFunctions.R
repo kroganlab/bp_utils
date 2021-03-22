@@ -98,8 +98,10 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              borderMM = 2,
                              brewerPalette = "Blues",
                              show_column_dend = FALSE,
+                             show_row_dend = FALSE,
                              border = TRUE,
                              max_pAdjust = 0.01,
+                             top_annotation = NULL,
                              ...){
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
   colors <- Blues(100)
@@ -118,8 +120,9 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                 #cluster_rows = ddr,
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
-                                show_row_dend = FALSE, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
+                                show_row_dend = show_row_dend, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
                                 row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
+                                top_annotation = top_annotation,
                                 cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.null(borderMatrix) & !is.null(borderColFun)){
                                     lwd <- unit(borderMM,"mm")
@@ -149,9 +152,16 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
-                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1, ...){
+                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
+                                      annotatePossibleMatches = TRUE, top_annotation = NULL,...){
   setorder(simplifiedEnrichTable, p.adjust)
   bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
+
+    if (is.null(fullEnrichTable)){
+    fullEnrichTable <- simplifiedEnrichTable
+    reduceRedundantsAcrossGroups <- FALSE
+  }
+
   if(reduceRedundantsAcrossGroups){  
     #reduce redundant based on clusters in fullEnrichTable
     countsByID <- fullEnrichTable[ID %in% bestTermPerBait$ID, .(geneCount  = length(unique(unlist(strsplit(geneID, "/"))))), by = .(ID, cluster)]
@@ -191,15 +201,22 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
       counts.mat<- counts.mat[,cols]
       main.mat<- main.mat[,cols]
     }
-    
   }
-  #print(str(counts.mat))
+
+  if (annotatePossibleMatches==TRUE){
+    genesInUniverseCounts <- unique(fullEnrichTable[, .(group, geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio)))])
+    cols <- colnames(main.mat)
+    setkey(genesInUniverseCounts, group)
+    topBars <- HeatmapAnnotation(`possible matches` = anno_barplot ( genesInUniverseCounts[cols, geneCount] ))
+    if (!is.null(top_annotation)){
+      warning("over writing non-null top annotation with possible matches")
+      #top_annotation <- top_annotation %v% topBars
+    }#else{
+      top_annotation <- topBars
+    #}
+  }
   
-  # temporary for comparison with splitCircle
-  #ddr <- as.dendrogram(hclust(dist(main.mat[,c(posCols, negCols)])))
-  
-  
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, top_annotation = top_annotation, ...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
