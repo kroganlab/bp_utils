@@ -270,5 +270,33 @@ NoTiesInPtmProbabilities <- function(ptmProbs, unmodSeqs, ptmCounts){
 }
 
 
+# colorPalettePowerScaled -- take a palette and step through it increasing steps ####
+# useful for emphasizing the top end (power > 1)
+# or the bottom end of a color palette (power < 1)
+#
+# general usage case
+# colors <- RColorBrewer::brewer.pal(9, "OrRd")
+# newColors <- colorPalettePowerScaled(colors)
+# ggplot(dt, aes(x,y,color = something)) + geom_point() + scale_color_gradientn(colors = newColors)
+
+
+
+colorPalettePowerScaled <- function(colors, power = 2){
+  numColors <-length (colors)
+  linearSteps <- 0:(length(colors)-1)
+  powerSteps <- linearSteps^power/max(linearSteps)^(power-1)
+  colorFunction <- circlize::colorRamp2(breaks = linearSteps, colors = colors)
+  if (length(powerSteps) < 9){
+    smallerLinearSteps <- seq(from = 0, to = max(linearSteps), length.out = 9)
+    powerSteps <- smallerLinearSteps^power/max(smallerLinearSteps)^(power-1)
+  }
+  newColors <- colorFunction(powerSteps)
+  return (newColors)
+}
+
+
+
+
+
 
 

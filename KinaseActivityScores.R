@@ -424,8 +424,10 @@ prepare_AMSS_ResultsFile <- function(resultsDT, column = "Protein"){
   
 
   expanded2SingleSites[, aaPos := aaAndPos]
-  expanded2SingleSites[, contrast_label := Label]
-  expanded2SingleSites[,phSiteCombo := Protein]
+  if (!"contrast_label" %in% colnames(expanded2SingleSites)){
+    expanded2SingleSites[, contrast_label := Label]
+  }
+  expanded2SingleSites[,phSiteCombo := expanded2SingleSites[[column]] ]
   
   chooseRepsInSiteLog2FCData(expanded2SingleSites, columnRename = c(Gene_Name = "singleProtein"))
   
