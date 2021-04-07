@@ -487,7 +487,13 @@ multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep =
   mapper <- data.table(uniprotSites = unique(as.character(uniprotSites)))
   #expand to singleSite, 1 per row
   mapper <- mapper[,.(singleSite = unlist(strsplit(uniprotSites, split = sep))), by = uniprotSites]
-  mapper[,c("uniprot", "site") := tstrsplit(singleSite, split = siteSep)]
+  
+  #deal with protein IDs that contain siteSep
+  idParts <-  strsplit(mapper$singleSite, split = siteSep)
+  protID <- sapply (idParts, function(x)paste(x[1:(length(x)-1)], collapse = siteSep))  
+  site <- sapply (idParts, function(x)x[length(x)])  
+  
+  mapper[,c("uniprot", "site") := .(protID, site)]
   mapper[,gene := translateUniprot2GeneName(uniprot, species, useDatFile = useDatFile)]
   if (any(is.na(mapper$gene))){
     message (length(mapper[is.na(gene), unique(uniprot)]), " uniprots could not be mapped to genes (using their uniprot ID in gene column)")
