@@ -22,6 +22,14 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
     message (sprintf("Not all genes with heat are found in network; heats reduced from %d to %d", numHeats, nrow(geneHeats)))
   }
   
+  duplicates <- geneHeats[, .N, by = gene][N > 1, .(gene)]
+  if(length(duplicates) > 0){
+    message (sprintf("Multiple heats found for %d genes; will take the max...be sure this is expected", length(duplicated)))
+    cat (paste(duplicates, collapse = ";"))
+    geneHeats <- geneHeats[, .(heat = max(heat, na.rm = TRUE)), by = gene]
+  }
+  
+  
   message (now(), " Propagating initial heat")
   
   heat.0 <- makeHeat.0(geneHeats, fullGenes = rownames(S_matrix))

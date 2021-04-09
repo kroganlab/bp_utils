@@ -22,6 +22,9 @@ fitPoly.MultiplePowers <- function(data,
   # for debugging...
   print (unique(data$gene))
   
+  if (length (otherTerms) != 1 | !"SUBJECT_ORIGINAL" %in% otherTerms )
+    stop("other terms other than SUBJECT_ORIGINAL, or no other terms, is not implemented yet")
+  
   # some checks...am I getting enough data to not fail...
   if (nrow(data) < 3){
     return (list(error = sprintf("Too few data points: %s", nrow(data))))
@@ -67,8 +70,13 @@ fitPoly.MultiplePowers <- function(data,
     
     # calculate expected values
     newData[,prediction := predict (lmout, newData)]
+    # collate actual with imputed for the missing
+    newData <- merge(newData, data[, c(polyColumn, otherTerms,  yColumn ), with = FALSE], by = c(polyColumn, otherTerms), all.x=TRUE)
+    newData[, actual := newData[[yColumn]] ]
+    newData[is.na(actual), actual := prediction]
+    
     # and means across subjects
-    timeMeans <- newData[,.(meanPrediction = mean(prediction)), by = c(polyColumn)]
+    timeMeans <- newData[,.(meanPrediction = mean(prediction), meanActual = mean(actual)), by = c(polyColumn)]
     #then deltas
     timeMeans[,paste0("delta.", start.times) := lapply (start.times,
                                                         function(t){
@@ -187,6 +195,8 @@ fitPoly.MultiplePowers <- function(data,
   maxDeltaList <- max.timeDelta(dpt, polyColumn)
   meanPredictions <- dpt$meanPrediction
   names(meanPredictions) <- paste0 ("prediction.", dpt[[polyColumn]])
+  meanActuals <- dpt$meanActual
+  names(meanActuals) <- paste0 ("actualWImputed.", dpt[[polyColumn]])
   
   
   # redo the fit using the best power and without poly, to get meaningful coefficients
@@ -203,6 +213,6 @@ fitPoly.MultiplePowers <- function(data,
   
   statsVector <- c(statsVector, coef(bestLM))
   
-  return (c(as.list(statsVector), maxDeltaList, as.list(meanPredictions)))
+  return (c(as.list(statsVector), maxDeltaList, as.list(meanPredictions), as.list(meanActuals)))
   
 }
