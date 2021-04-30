@@ -169,9 +169,9 @@ This is also useful if you want to change the contrasts, in which case you shoul
 
 ```{r, eval = FALSE}
 # source (file.path (githubKroganLab, "bp_utils", "MSstats_Helper_Functions.R"))
-#
-# mss.normalized.txt <-file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
-# protQuant.txt <- file.path(outFilePrefix, "output", "results_RunLevelData.txt") 
+# 
+# mss.normalized.txt <-file.path(outFilePrefix, "output", "results-mss-normalized.txt")
+# protQuant.txt <- file.path(outFilePrefix, "output", "results_RunLevelData.txt")
 # mssQuant <- loadProcessedDataFromArtMS(mss.normalized.txt, protQuant.txt )
 # 
 # 
@@ -179,7 +179,8 @@ This is also useful if you want to change the contrasts, in which case you shoul
 # contrast.mat <- makeContrast.artMSFile(contrasts.txt)
 # 
 # results <- MSstats::groupComparison(contrast.mat, mssQuant)
-
+# 
+# fwrite (results, file.path (outFilePrefix, "output", "results.txt"))
 ```
 
 
