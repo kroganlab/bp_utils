@@ -180,7 +180,7 @@ This is also useful if you want to change the contrasts, in which case you shoul
 # 
 # results <- MSstats::groupComparison(contrast.mat, mssQuant)
 # 
-# fwrite (results, file.path (outFilePrefix, "output", "results.txt"))
+# fwrite (results$ComparisonResult, file.path (outFilePrefix, "output", "results.txt"))
 ```
 
 
