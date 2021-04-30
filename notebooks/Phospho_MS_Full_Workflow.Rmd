@@ -163,6 +163,24 @@ setwd(originalWorkingDirectory)
 
 ```
 
+### only needed if groupComparison fails
+If you got errors from `artMSQuantification`, and you see a results_RunLevelData.txt file but not a results.txt file, this code is for you.  Un-comment and run all lines.
+This is also useful if you want to change the contrasts, in which case you should edit the contrasts file beforehand.
+
+```{r, eval = FALSE}
+# source (file.path (githubKroganLab, "bp_utils", "MSstats_Helper_Functions.R"))
+#
+# mss.normalized.txt <-file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
+# protQuant.txt <- file.path(outFilePrefix, "output", "results_RunLevelData.txt") 
+# mssQuant <- loadProcessedDataFromArtMS(mss.normalized.txt, protQuant.txt )
+# 
+# 
+# contrasts.txt <- file.path (outFilePrefix, "contrasts.txt")
+# contrast.mat <- makeContrast.artMSFile(contrasts.txt)
+# 
+# results <- MSstats::groupComparison(contrast.mat, mssQuant)
+
+```
 
 
 

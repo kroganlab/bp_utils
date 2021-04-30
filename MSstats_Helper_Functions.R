@@ -57,6 +57,34 @@ subsetDataProcessOutput <- function(mssquant.full, groups, newRunLevelData = NUL
 }
 
 
+# artMS writes the output of dataProcess in two files,  results-mss-normalized.txt and
+# results_RunLevelData.txt. This function loads these files and formats/packages them in a list
+# so that MSstats can continue with groupComparison
+loadProcessedDataFromArtMS <- function (results.mss.normalized.txt, results_RunLevelData.txt, groupSubset = NULL){
+  normalizedPep <- fread(results.mss.normalized.txt)
+  proteinQuant <- fread (results_RunLevelData.txt)
+  
+  #"ProcessedData"     "RunlevelData"      "SummaryMethod"     "ModelQC"           "PredictBySurvival"
+  mssquant <- list (ProcessedData  = normalizedPep,
+                    RunlevelData = proteinQuant,
+                    SummaryMethod = "TMP",  # the most likely guess...I don't think it matters for downstream analysis
+                    ModelQC = NULL,
+                    PredictBySurvival = NULL)
+  
+  if (is.null(groupSubset))
+    groupSubset <- unique(mssquant$RunlevelData$GROUP_ORIGINAL) # all groups
+
+  # regarless of subsetting, we use this function to make everything a factor that needs to be
+  mssquant <- subsetDataProcessOutput (mssquant, groupSubset)
+  return (mssquant)
+}
+
+
+#makes use of artMS internal function to load an artMS formatted contrasts file
+makeContrast.artMSFile <- function (contrasts.txt){
+  contrast.mat <- artMS:::.artms_writeContrast(contrasts.txt)
+  return (contrast.mat)
+}
 
 
 makeContrast.regEx <- function(mssQ, regEx){
