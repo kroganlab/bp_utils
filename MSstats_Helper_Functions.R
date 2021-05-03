@@ -1,13 +1,16 @@
 
 
 
-subsetDataProcessOutput <- function(mssquant.full, groups, newRunLevelData = NULL){
+subsetDataProcessOutput <- function(mssquant.full, groups = NULL, proteins = NULL, newRunLevelData = NULL){
   subset <- list()
-  subset$ProcessedData <- data.table(mssquant.full$ProcessedData)[GROUP_ORIGINAL %in% groups,]
+  subset$ProcessedData <- data.table(mssquant.full$ProcessedData)[ (is.null(groups) | GROUP_ORIGINAL %in% groups) &
+                                                                     (is.null(proteins) | PROTEIN %in% proteins),]
   if (is.null(newRunLevelData)){
-    subset$RunlevelData <- data.table(mssquant.full$RunlevelData)[GROUP_ORIGINAL %in% groups,]
+    subset$RunlevelData <- data.table(mssquant.full$RunlevelData)[(is.null(groups) | GROUP_ORIGINAL %in% groups) &
+                                                                    (is.null(proteins) | Protein %in% proteins),]
   } else{
-    subset$RunlevelData <- data.table(newRunLevelData)[GROUP_ORIGINAL %in% groups,]
+    subset$RunlevelData <- data.table(newRunLevelData)[(is.null(groups) | GROUP_ORIGINAL %in% groups) &
+                                                         (is.null(proteins) | Protein %in% proteins),]
   }
   
   # # RunlevelData might need columns in a specific order:
