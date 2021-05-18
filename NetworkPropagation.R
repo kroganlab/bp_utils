@@ -1,3 +1,6 @@
+library(data.table)
+# also requires RcppCNpy for LoadNumPyS_matrix
+
 
 
 LoadNumPyS_matrix <- function (matrixPath, nodesTablePath){
@@ -16,16 +19,17 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   message (now(), " Checking S matrix")
   stopifnot(check_s_matrix(S_matrix))
   
-  if(not(all(geneHeats$gene %in% rownames(S_matrix)))){
+  if(!all(geneHeats$gene %in% rownames(S_matrix))){
     numHeats <- nrow(geneHeats)
     geneHeats <- geneHeats[gene %in% rownames(S_matrix)]
     message (sprintf("Not all genes with heat are found in network; heats reduced from %d to %d", numHeats, nrow(geneHeats)))
   }
   
-  duplicates <- geneHeats[, .N, by = gene][N > 1, .(gene)]
+  duplicates <- geneHeats[, .N, by = gene][N > 1, ]$gene
   if(length(duplicates) > 0){
-    message (sprintf("Multiple heats found for %d genes; will take the max...be sure this is expected", length(duplicated)))
-    cat (paste(duplicates, collapse = ";"))
+    message (sprintf("Multiple heats found for %d genes; will take the max; be sure this is expected:", length(duplicates)),
+             paste0(head(duplicates, 6), collapse = ","), 
+             ifelse(length(duplicates) > 6, ",...", ""))
     geneHeats <- geneHeats[, .(heat = max(heat, na.rm = TRUE)), by = gene]
   }
   
