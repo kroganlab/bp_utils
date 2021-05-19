@@ -61,7 +61,7 @@ downloadUniprotSequences <- function(uniprots, numConnections = 1){
   fastaURL <- paste0('https://www.uniprot.org/uniprot/', uniprots, '.fasta')
   cat (sprintf("Downloading %d sequences directly from uniprot\n", length(uniprots)))
   cat ("This might hang  for an unusually long time, and maybe some uniprots will fail to download (with a message).")
-  cat ("If so, and you need this functionality. Bug or bribe me to fix it. -BP\n")
+  cat ("If so, and you need this functionality, bug or bribe me to fix it. -BP\n")
   
   
   #fastaTxt <- RCurl::getURLAsynchronous(url = fastaURL, perform = numConnections)
@@ -115,7 +115,7 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   # we have a list of matrices. one matrix per row. expand as many rows as there are sites in the row
   mapper.expanded <- mapper[, .(pepSitePTM = ptmPositions[[1]][,"start"] -
                                   # subtract 1 because the (ph) labels the preceding AA, and subtract an additional 4 per each preceding mod
-                                  seq(from = 1, by = length(ptmFormat), length.out =nrow(ptmPositions[[1]]))  ),
+                                  seq(from = 1, by =  stringr::str_length(ptmFormat), length.out =nrow(ptmPositions[[1]]))  ),
                             by = .(fragPipeProteinName, uniprot, modPeptide)]
   
   mapper.expanded[, cleanPeptide := convertMassModificationFormat (modPeptide, removeAll = TRUE)]
