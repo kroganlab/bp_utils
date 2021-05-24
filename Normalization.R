@@ -106,9 +106,11 @@ normalizeByMedianPolish.evidenceFile <- function(inFilePath, standards = NULL, d
   if (is.null(outFilePath))
     outFilePath <- gsub ("(\\.txt)?$", ".MP_normalized.txt", inFilePath)
 
-  ev <- fread (inFile, integer64= "double")
+  ev <- fread (inFilePath, integer64= "double")
   colNames <- c("runID", "proteinID", "featureID", "logIntensity")
+  # avoid over-writing pre-existing columns
   stopifnot (!any(colNames %in% colnames(ev)))
+  # define columns that normalizeByMedianPolish depends on
   ev[, c("runID", "proteinID", "featureID", "logIntensity") :=
        .(`Raw file`,
          `Leading razor protein`,
@@ -117,6 +119,7 @@ normalizeByMedianPolish.evidenceFile <- function(inFilePath, standards = NULL, d
   ]
   
   ev.norm <- normalizeByMedianPolish (ev, standards = standards, doPlots = doPlots)
+  
   # clean up
   ev.norm[, Intensity.prenormalization := Intensity]
   ev.norm[, Intensity := 2^normLogIntensity]
