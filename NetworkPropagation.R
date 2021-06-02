@@ -15,7 +15,7 @@ LoadNumPyS_matrix <- function (matrixPath, nodesTablePath){
 
 
 # geneHeats : data.table with gene and heat columns
-NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000, networkHeatOnly = FALSE, permuteOnlyInObserved=FALSE){
+NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000, networkHeatOnly = FALSE, permuteOnlyInObserved=FALSE, calculateContributions = FALSE){
   message (now(), " Checking S matrix")
   stopifnot(check_s_matrix(S_matrix))
   
@@ -68,7 +68,29 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
                          adj.pvalue = p.adjust(pValue, method="BH"),
                          self.heat = heat.0 * diag(S_matrix))
   
-  return(results)
+  if (calculateContributions == TRUE){
+    message (now(), " Calculating per-gene contributions to final heat for genes with p.value < 0.05")
+    sigGenes <- results[pvalue < 0.05,]$gene
+    toFromTable <- CalculateContributions (S_matrix, heat.0, sigGenes, networkHeatOnly)
+    return(list(results = results, contributions = toFromTable))
+  }else{
+    return(results)
+  }
+}
+
+
+CalculateContributions <- function(S_matrix, startHeats, sigGenes, networkHeatOnly){
+  stopifnot (all (names(startHeats) == rownames(S_matrix)))
+  
+  toFromMat <- t(S_matrix[sigGenes, ]) * startHeats  #this works based on recycling the startHeats vector over t(S), column-wise.  We can safely subset rows, but not columns.
+  toFromTable <- melt(as.data.table(toFromMat, keep.rownames= TRUE), id.vars = "rn", variable.name = "from", value.name = "contributed.heat", )
+  setnames(toFromTable, old = "rn", new = "to")
+  if (networkHeatOnly == TRUE)
+    toFromTable[to == from, contributed.heat := 0.0]
+  toFromTable[, percent.contributed.heat := 100 * contributed.heat/sum(contributed.heat, na.rm = TRUE), by = to]
+  setorder (toFromTable, -percent.contributed.heat, na.last = TRUE)
+  toFromTable[, cumulative.percent.contributed.heat := cumsum(percent.contributed.heat), by = to]
+  return (toFromTable)
 }
 
 
