@@ -82,15 +82,15 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
 CalculateContributions <- function(S_matrix, startHeats, sigGenes, networkHeatOnly){
   stopifnot (all (names(startHeats) == rownames(S_matrix)))
   
-  toFromMat <- t(S_matrix[sigGenes, ]) * startHeats  #this works based on recycling the startHeats vector over t(S), column-wise.  We can safely subset rows, but not columns.
-  toFromTable <- melt(as.data.table(toFromMat, keep.rownames= TRUE), id.vars = "rn", variable.name = "from", value.name = "contributed.heat", )
-  setnames(toFromTable, old = "rn", new = "to")
+  fromToMat <- t(S_matrix[sigGenes, ]) * startHeats  #this works based on recycling the startHeats vector over t(S), column-wise.  We can safely subset rows, but not columns.
+  fromToTable <- melt(as.data.table(fromToMat, keep.rownames= TRUE), id.vars = "rn", variable.name = "to", value.name = "contributed.heat", )
+  setnames(fromToTable, old = "rn", new = "from")
   if (networkHeatOnly == TRUE)
-    toFromTable[to == from, contributed.heat := 0.0]
-  toFromTable[, percent.contributed.heat := 100 * contributed.heat/sum(contributed.heat, na.rm = TRUE), by = to]
-  setorder (toFromTable, -percent.contributed.heat, na.last = TRUE)
-  toFromTable[, cumulative.percent.contributed.heat := cumsum(percent.contributed.heat), by = to]
-  return (toFromTable)
+    fromToTable[to == from, contributed.heat := 0.0]
+  fromToTable[, percent.contributed.heat := 100 * contributed.heat/sum(contributed.heat, na.rm = TRUE), by = to]
+  setorder (fromToTable, -percent.contributed.heat, na.last = TRUE)
+  fromToTable[, cumulative.percent.contributed.heat := cumsum(percent.contributed.heat), by = to]
+  return (fromToTable)
 }
 
 
