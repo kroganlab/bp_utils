@@ -9,7 +9,7 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
                    CAM = "(.)\\[57.0215\\]",
                    PH = "(.)\\[79.9663\\]",
                    NAC = "n\\[42.0106\\](.)",
-                   ANY = "\\[[0-9.]+\\]")  # used for matching all or all but keepOnly
+                   ANY = "n?\\[[0-9.]+\\]")  # used for matching all or all but keepOnly
   
   
   artmsFormats <- list (PH='\\1\\(ph\\)',
@@ -140,12 +140,20 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   # merge/modify with up.dt
   # first count matches in case the peptide is duplicated in the protein
   mapper.expanded[up.dt, peptideCopies := stringr::str_count(sequence, cleanPeptide),on = "uniprot"]
+  if (any (mapper.expanded$peptideCopies == 0)){
+    notMatched <- unique(mapper.expanded[peptideCopies == 0]$fragPipeProteinName)
+    message (length(notMatched), " peptides could not be located within their protein. Is this the correct FASTA?")
+    print(head(notMatched))
+    message ("The unmatched peptides will be removed from futher analysis")
+    mapper.expanded <- mapper.expanded[peptideCopies > 0]
+  }
   if (any (mapper.expanded$peptideCopies > 1)){
     message ("Some peptides are duplicated within their protein.  In these cases only the first possible location will be labeled")
     print (mapper.expanded[peptideCopies > 1 , 
                            .(maxCopies = max(peptideCopies), countCopiedPeptides = length(unique(cleanPeptide))),
                            by = uniprot])
   }
+
   mapper.expanded[up.dt, peptideStart := stringr::str_locate(sequence, cleanPeptide)[,"start"],on = "uniprot"]
   mapper.expanded[, ptmPos := pepSitePTM + peptideStart -1 ]
   

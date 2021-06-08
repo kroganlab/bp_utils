@@ -295,8 +295,19 @@ colorPalettePowerScaled <- function(colors, power = 2){
 }
 
 
+# corum from omnipath ####
 
-
-
+corumPairsFromOmniPath <- function (){
+  corumDT <- OmnipathR::import_omnipath_complexes(resources = "CORUM")
+  setDT(corumDT)
+  complex2Protein <- corumDT[, .(protein  = unique(unlist(strsplit(components, split = "_")))), by = name]
+  pairwiseCorum <- merge (complex2Protein, complex2Protein, by = "name", allow.cartesian = TRUE)[protein.x < protein.y]
+  
+  
+  
+  complex2Gene <- corumDT[, .(gene  = unique(unlist(strsplit(components_genesymbols, split = "_")))), by = name]
+  pairwiseCorumGenes <- merge (complex2Gene, complex2Gene, by = "name", allow.cartesian = TRUE)[gene.x < gene.y]
+  list (genes = pairwiseCorumGenes, proteins = pairwiseCorum)
+}
 
 

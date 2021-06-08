@@ -1,7 +1,7 @@
 library (data.table)
 
 
-simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn="bait", 
+simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
                                                       cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01){
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
@@ -15,7 +15,11 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   ##Prepare Significant GO Term Jaccard Similarity Matrix
   sig_go_terms <- unique(target_overrep_sig$ID)
   
-  message ("Computing universal gene overlap between ", length(sig_go_terms), " significant GO terms from ", length(unique(enrichResultsTable[[groupColumn]])), " ", groupColumn, "(s)")
+  if (!is.null(groupColumn)){
+    message ("Computing universal gene overlap between ", length(sig_go_terms), " significant GO terms from ", length(unique(enrichResultsTable[[groupColumn]])), " ", groupColumn, "(s)")
+  }else{
+    message ("Computing universal gene overlap between ", length(sig_go_terms), " significant GO terms")
+  }
   
   gmt.subset <- gmt[ont %in% sig_go_terms, .(ont=factor(ont), gene=factor(gene))]
   termByGeneMat <-  Matrix::sparseMatrix(as.integer(gmt.subset$ont), as.integer(gmt.subset$gene), 
@@ -207,7 +211,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     genesInUniverseCounts <- unique(fullEnrichTable[, .(group, geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio)))])
     cols <- colnames(main.mat)
     setkey(genesInUniverseCounts, group)
-    topBars <- HeatmapAnnotation(`possible matches` = anno_barplot ( genesInUniverseCounts[cols, geneCount] ))
+    topBars <- HeatmapAnnotation(`Group Sizes` = anno_barplot ( genesInUniverseCounts[cols, geneCount] ))
     if (!is.null(top_annotation)){
       warning("over writing non-null top annotation with possible matches")
       #top_annotation <- top_annotation %v% topBars
@@ -216,7 +220,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     #}
   }
   
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, top_annotation = top_annotation, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, ...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }

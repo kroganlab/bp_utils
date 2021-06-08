@@ -216,3 +216,8 @@ fitPoly.MultiplePowers <- function(data,
   return (c(as.list(statsVector), maxDeltaList, as.list(meanPredictions), as.list(meanActuals)))
   
 }
+
+
+fitPoly.MultiplePowers.friendlyOutput <- function ()
+
+

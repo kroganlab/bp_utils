@@ -18,6 +18,60 @@ DateFileName <- function(x){
   print (name)
   return (name)
 }
+
+ScriptNamedDir <- function(){
+  scriptName <- rstudioapi::getActiveDocumentContext()$path
+  if (is.null (scriptName) || scriptName == "")
+    stop("No script name found -- you may need to save this file first")
+  outDir <- gsub(".R(md)?$", "_data", scriptName)
+  if (!dir.exists(outDir)){
+    message ("Creating directory associated with ", scriptName,", at ", outDir)
+    dir.create(outDir)
+  }
+  return(outDir)
+}
+
+
+ScriptAndDatedFileName <- function(x){
+  dir <- ScriptNamedDir()
+  fileName <- DateFileName(x)
+  path <- file.path(dir, fileName)
+  print (path)
+  return (path)
+}
+
+PDFBackupFileName <- function(prefix = ""){
+  scriptDir <- ScriptNamedDir()
+  imageDir <- file.path(scriptDir, "pdfs")
+  if (!dir.exists(imageDir)) dir.create(imageDir)
+  now <- format(Sys.time(),  "%Y_%m_%d__%H_%M__%S")
+  path <- file.path (imageDir, sprintf("%s%s.pdf", prefix, now))
+  while (file.exists(path)){
+    seconds <- unlist(strsplit (gsub("\\.pdf$", "", basename(path)), split = "_"))[8]
+    seconds <- as.numeric(seconds) + 0.1
+    path <- gsub ("[0-9.]+$", as.character(seconds), path)
+  }
+  return (path)
+}
+
+BackupAsPDF <- function(graphics, prefix = ""){
+  path <- PDFBackupFileName(prefix)
+  dimensions <- dev.size(units = "in")
+  
+  # handle my enrichment heatmaps that are part of a list
+  if (! ("ggplot" %in% class(graphics) | "Heatmap" %in% class(graphics) | "HeatmapList" %in% class(graphics))){
+    g <- graphics$hmList    
+  }else{
+    g <- graphics
+  }
+  
+  print (sprintf("Writing image to  %s", path))
+  cairo_pdf(path, width = dimensions[1], height = dimensions[2])
+    print (g)
+  dev.off()
+  return (graphics)
+}
+
 ```
 
 # config
@@ -36,7 +90,7 @@ results.txt <- "xiaofang/2020_10_26_lsd.run1_output/results.txt"
 
 ```{r}
 source(file.path(githubKroganLab,  "bp_utils" ,"KinaseActivityScores.R"))
-kinaseData <- loadKinaseData(file.path(githubKroganLab, "bp_utils", "data", "kinaseSiteList_BachmanGyoriSorger2019.csv.gz"))[]
+#kinaseData <- loadKinaseData(file.path(githubKroganLab, "bp_utils", "data", "kinaseSiteList_BachmanGyoriSorger2019.csv.gz"))[]
 
 
 #load MSstats results data
@@ -44,7 +98,8 @@ results <- fread (results.txt)
 
 # convert to single site info based on gene names
 source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
-results[,gene := multiUniprotSites2multiGeneSites(Protein)]
+# useDatFile = TRUE will download a uniprot file.  I find it makes more/better matches than the default BioConductor annotation dB
+results[,gene := multiUniprotSites2multiGeneSites(Protein, useDatFile = TRUE)] 
 singleSiteResults <- prepare_AMSS_ResultsFile(results, column = "gene")
 
 labels <- unique(singleSiteResults$Label)
