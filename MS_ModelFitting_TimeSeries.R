@@ -218,6 +218,28 @@ fitPoly.MultiplePowers <- function(data,
 }
 
 
-fitPoly.MultiplePowers.friendlyOutput <- function ()
+#' Take the very large and unwieldy table output from rbindlist(lapply(proteinTables, fitPoly.MultiplePowers)) and make something nicer
+#' @param polyFits output of rbindlist(lapply(proteinTables, fitPoly.MultiplePowers))
+#' @param preColumns to include before the default columns
+#' @param postColumns to include bewteen the default columns and actual/prediction columns
+#' @return A nice data.table
+#' @example nice.out <- nicePolyFitOutput (combined, preColumns = c("rank", "receptor", "passFilter"), postColumns = "original.log2FC")  
+
+nicePolyFitOutput <- function(polyFits, preColumns = c(), postColumns = c()){
+  actualColumns <- sort (grep("actualWImputed", colnames(polyFits), value = TRUE))
+  predictionColumns <- sort (grep("prediction", colnames(polyFits), value = TRUE))
+  columns <- c(preColumns,
+               c("Protein", polynomialPower = "bestPower", pvalue = "best.pF.polyColumn", log2FC = "bestDelta", timeIdxOfBestDelta = "bestTime"),
+               postColumns,
+               actualColumns,
+               predictionColumns
+  )
+  
+  result <- polyFits[, .SD,.SDcols = columns]
+  setnames(result,
+           old = c("bestPower",       "best.pF.polyColumn","bestDelta", "bestTime"),
+           new = c("polynomialPower", "pvalue",            "log2FC",    "timeIdxOfBestDelta"))
+  result[]
+}
 
 

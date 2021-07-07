@@ -174,6 +174,16 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     bestTerms <- countsByID[,.SD[1],by=cluster]$ID
   } else bestTerms <- unique(bestTermPerBait$ID)
   
+  if (!is.null(negCols) & !is.null(cols)){
+    negOnly <- setdiff(negCols, cols)
+    if (length(negOnly) > 0)
+      message ("Columns specified in negCols not found in cols, these will be removed ", paste (negOnly, collapse = ", "))
+    negCols <- intersect (cols, negCols)
+  }
+  if (!is.null(negCols) & length(negCols) == 0){
+    warning ("negCols is set to an empty vector. Did you get the right names? Set to NULL(default) for no negative columns")
+  }
+    
   main.wide <- dcast (fullEnrichTable[ID %in% bestTerms], as.formula(paste("Description", groupColumn, sep="~")), value.var="p.adjust")
   for(col in unique(c(cols,negCols))){
     if (is.null(main.wide[[col]])) main.wide[[col]] <- NA
@@ -450,3 +460,21 @@ test_splitCircleHeatMap <- function(){
   
 }
 
+
+
+loadCORUMasGMT <- function (path = NULL, species = c("HUMAN", "MOUSE"), idType = c("symbol", "uniprot")){
+  if (is.null(path))
+    stop ("Download and unzip file from ", "http://mips.helmholtz-muenchen.de/corum/download/allComplexes.txt.zip")
+  corumDT <- fread (path)[toupper(Organism) == toupper (species)]
+  if(nrow(corumDT) == 0)
+    stop("no rows read from file that match the species requested", path, species)
+  # lookup the column name
+  idColumn <- c(uniprot = "subunits(UniProt IDs)",
+                symbol =  "subunits(Gene name)")[idType]
+  # just hte columns desired
+  subTable <- corumDT[, .SD, by = .(ComplexID, ComplexName), .SDcols = idColumn]
+  # expand the genes/uniprots column
+  expanded <- subTable[, .(gene = unlist(strsplit(.SD[[idType]], ";"))), by = . (ComplexID, ComplexName) ]
+  # reorder to expected term2gene format
+  return(expanded[, .(ont = ComplexName, gene, ComplexID)])
+}
