@@ -1,4 +1,5 @@
 library (data.table)
+library (magrittr) # for %>% 
 
 
 
@@ -23,8 +24,8 @@ cellMapTable2ListOfSets <- function (cellMap, identifiers = c("symbol", "UniProt
 
 
 #' Given a matrix and a column name perform fgsea on a single column
-#' sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
-#' scoreType, usually "std" for positive and negative or "pos" for positive only
+#' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
 oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
   print (columnName)
   log2FC <- mat[,columnName]
@@ -32,16 +33,15 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   log2FC <- sample(log2FC, length(log2FC))
   
   #nperm=1000, gseaWeightParam = 1, nproc=1
-  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, ...)
+  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
   return (seaRes)
 }
 
-#' Given a matrix  fgsea on all columns, return table of results with column "group" identifying the column of the matrix
+#' Given a matrix run fgsea on all columns, return table of results with column "group" identifying the column of the matrix
 #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
 #' @param scoreType is chosen based on presence of negative or positive values in the matrix
 #' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
-
 matrixFGSEA <- function (mat, sets, ...){
   anyPositive <- any(mat > 0)
   anyNegative <- any(mat < 0)
@@ -78,9 +78,15 @@ setLocateScoresTable <- function(scores.dt, cellMap.dt = NULL, idCol = "Protein"
   invisible(scores.dt)
 }
 
-
-
-cellMapLocalizationScores <- function(scores.dt, groupCol = "Label", scoreCol = "log2FC", idCol = "Protein", type = c("UNIPROT", "SYMBOL")){
+#' Given a table of proteins scores, like a results file from MSstats, do a localization enrichment per comparison or other group
+#' Columns groupCol, scoreCol, idCol are set by default to work with results from MSstats, but can be configured for other named columns
+#' @param scores.dt a data.table, such as the result of fread(results.txt)
+#' @param groupCol character column name to subdivide the results. Enrichment will be done within each group.
+#' @param scoreCol character column name that 
+#' @param idCol character  column name, to match to localized proteins in cell map. Allowed formats are uniprot or gene symbol
+#' @param type is idCol uniprot or gene symbol?
+#' @param ... other arguments to send to FGSEA
+cellMapLocalizationScores <- function(scores.dt, groupCol = "Label", scoreCol = "log2FC", idCol = "Protein", type = c("UNIPROT", "SYMBOL"), ...){
   cellMap.dt <- loadCellMap()
   cellMap.idCol <- c(UNIPROT = "UniProt",
                      SYMBOL = "symbol")[
@@ -106,6 +112,7 @@ cellMapLocalizationScores <- function(scores.dt, groupCol = "Label", scoreCol = 
   invisible(list(scores.dt = scores.dt, sea.dt = sea.dt))
 }
 
+#' @param scores.dt something like a results file but annotated with location and location enrichment by cellMapLocalizationScores
 #' @param gridFormula optional, something like receptor~time to see receptors in rows and time in columns. if null then .~groupCol
 
 violinsAndScatterLocations <- function (scores.dt, scoreCol = "log2FC", groupCol = "Label", xlimits = NULL, gridFormula = NULL, reorder = TRUE){
@@ -114,9 +121,6 @@ violinsAndScatterLocations <- function (scores.dt, scoreCol = "log2FC", groupCol
     orderIdx <- dist(sea.mat) %>% hclust %>% as.dendrogram %>% order.dendrogram
     scores.dt[, location := factor(location, levels = rownames(sea.mat)[orderIdx]) ]
   }
-  
-  
-  
   if (is.null(gridFormula))
     gridFormula <- as.formula (sprintf (".~%s", groupCol))
   p <- ggplot (scores.dt[!is.na(location)],
@@ -134,7 +138,7 @@ violinsAndScatterLocations <- function (scores.dt, scoreCol = "log2FC", groupCol
 
 
 
-#' First 
+#' utility protein to pull location.enrichment scores from a full results table. Useful especially for making a heatmap.
 summarizesSEAMatrixFromScoresDT <- function (scores.dt, groupCol = "Label"){
   formula <- as.formula (sprintf ("location~%s", groupCol))
   as.matrix (dcast (scores.dt[!is.na(sea.sigScore)], formula, value.var = "sea.sigScore", fun.aggregate = max),
@@ -142,8 +146,8 @@ summarizesSEAMatrixFromScoresDT <- function (scores.dt, groupCol = "Label"){
 }
 
 
-usage <- function(results.txt){
-  results <- fread (result.txt)
+usageExample <- function(results.txt){
+  results <- fread (results.txt)
   source ("../../bp_utils/Localization_CellMap.R")
   result.list <- cellMapLocalizationScores(results)
   p <- violinsAndScatterLocations(results)
