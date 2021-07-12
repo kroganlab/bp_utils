@@ -138,7 +138,7 @@ violinsAndScatterLocations <- function (scores.dt, scoreCol = "log2FC", groupCol
 
 
 
-#' utility protein to pull location.enrichment scores from a full results table. Useful especially for making a heatmap.
+#' utility function to pull location.enrichment scores from a full results table. Useful especially for making a heatmap.
 summarizesSEAMatrixFromScoresDT <- function (scores.dt, groupCol = "Label"){
   formula <- as.formula (sprintf ("location~%s", groupCol))
   as.matrix (dcast (scores.dt[!is.na(sea.sigScore)], formula, value.var = "sea.sigScore", fun.aggregate = max),
