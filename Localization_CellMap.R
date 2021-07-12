@@ -32,8 +32,14 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   # reorder randomly so ties are less likely to influence results
   log2FC <- sample(log2FC, length(log2FC))
   
-  # fgsea failes with missing values
+  # fgsea fails with missing values
   log2FC <- log2FC[!is.na(log2FC)]
+  
+  # fgsea fails with infinite values
+  if (any (is.infinite(log2FC))){
+    message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
+    log2FC <- log2FC[is.finite(log2FC)]
+  }
   
   #nperm=1000, gseaWeightParam = 1, nproc=1
   seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
