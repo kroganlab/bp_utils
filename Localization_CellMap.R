@@ -32,6 +32,9 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   # reorder randomly so ties are less likely to influence results
   log2FC <- sample(log2FC, length(log2FC))
   
+  # fgsea failes with missing values
+  log2FC <- log2FC[!is.na(log2FC)]
+  
   #nperm=1000, gseaWeightParam = 1, nproc=1
   seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
@@ -43,8 +46,8 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
 #' @param scoreType is chosen based on presence of negative or positive values in the matrix
 #' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
 matrixFGSEA <- function (mat, sets, ...){
-  anyPositive <- any(mat > 0)
-  anyNegative <- any(mat < 0)
+  anyPositive <- any(mat > 0, na.rm = TRUE)
+  anyNegative <- any(mat < 0, na.rm = TRUE)
   if (anyPositive & anyNegative)
     scoreType = "std"
   if (anyPositive & !anyNegative)
