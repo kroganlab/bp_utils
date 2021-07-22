@@ -32,7 +32,7 @@ doParallelNMF_BG <- function (data.mat, ranks = 1:20, numIterations=24, numProc=
 
 #' Simple function to put both the basis and coefficients tables into an excel sheet
 writeNMFMatrices2Excel <- function (nmf, fileName){
-  coefficients <- coefficients(nmf)
+  coefficients <- NMF::coef(nmf)
   basis <- as.data.table (NMF::basis (nmf), keep.rownames = TRUE) 
   openxlsx::write.xlsx(list(coefficients = coefficients, basis = basis), fileName )
 }
@@ -47,3 +47,20 @@ writeNMFListToScriptAndDatedFileName <- function (best.nmfs, fileNameFormat = "n
          }) %>% invisible()
 }
 
+
+loadNMFBasisVectors <- function (fileName) {
+  table <- openxlsx::read.xlsx(fileName, sheet = "basis")
+  setDT(table)
+  mat <- as.matrix(table, rownames = "rn")
+  colnames(mat) <- sprintf("basis.%02d", seq_len(ncol(mat)))
+  return (mat)
+}
+
+
+# loadNMFCoefficients <- function (fileName) {
+#   table <- openxlsx::read.xlsx(fileName, sheet = "basis")
+#   setDT(table)
+#   mat <- as.matrix(table, rownames = "rn")
+#   colnames(mat) <- sprintf("basis.%02d", seq_len(ncol(mat)))
+#   return (mat)
+# }

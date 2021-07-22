@@ -120,6 +120,10 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmo
   # set new paths and confirm that they are new (confirm that gsub found something to work on)
   newEvidence <- gsub (".txt$", paste0(".",site,".txt"), artmsInput$config_data$files$evidence)
   stopifnot (newEvidence != artmsInput$config_data$files$evidence)
+  if (is.null(newEvidence) | length(newEvidence) == 0){
+    newEvidence <- sprintf ("evidence.%s.txt", site)
+    message ("New evidence will be written to ", newEvidence)
+  }
   
   newConfigFile <- gsub (".yaml$", paste0(".", site, ".yaml"), artmsInput$config_file)
   stopifnot (newConfigFile != artmsInput$config_file)
@@ -141,13 +145,17 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmo
   #this gets the default config
   newConfig <- artmsWriteConfigYamlFile (config_file_name = NULL, verbose=FALSE)
   #set all values passed in from artmsInput...
-  newConfig <- modifyList(newConfig, artmsInput$config_data)
+  if (is.list(artmsInput$config_data)){
+    newConfig <- modifyList(newConfig, artmsInput$config_data)
+    }
   #new values here:
   newConfig$files$evidence <- newEvidence
   newConfig$data$filters$modifications <- site
   
-  write_yaml(x = newConfig, file = newConfigFile)
-  message ("New config file for ", site, " analysis written to ", newConfigFile)
+  if(!is.null(newConfigFile) & length(newConfigFile) > 0){
+    write_yaml(x = newConfig, file = newConfigFile)
+    message ("New config file for ", site, " analysis written to ", newConfigFile)
+  }
   
   invisible (modifyList (artmsInput, list(evidence_file = newEvidence,
                                           config_file  = newConfigFile,

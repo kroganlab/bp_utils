@@ -11,6 +11,10 @@ subsetDataProcessOutput <- function(mssquant.full, groups = NULL, proteins = NUL
   } else{
     subset$RunlevelData <- data.table(newRunLevelData)[(is.null(groups) | GROUP_ORIGINAL %in% groups) &
                                                          (is.null(proteins) | Protein %in% proteins),]
+    
+    #make the subjects match based on RUN to allow for renaming of subjects for different nested design
+    rld <- unique(subset$RunlevelData[,.(RUN, originalRUN, GROUP, GROUP_ORIGINAL, SUBJECT_ORIGINAL, SUBJECT_NESTED, SUBJECT)])
+    subset$ProcessedData[rld, c("SUBJECT_ORIGINAL", "SUBJECT_NESTED", "SUBJECT") := .(i.SUBJECT_ORIGINAL, i.SUBJECT_NESTED, i.SUBJECT), on = "RUN"]
   }
   
   # # RunlevelData might need columns in a specific order:

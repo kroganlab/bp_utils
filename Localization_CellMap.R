@@ -29,6 +29,12 @@ cellMapTable2ListOfSets <- function (cellMap, identifiers = c("symbol", "UniProt
 oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
   print (columnName)
   log2FC <- mat[,columnName]
+  
+  if (var(log2FC, na.rm = TRUE) == 0){
+    message ("No variance detected in ", columnName, " returning NULL to avoid a fgsea crash")
+    return (NULL)
+  }
+  
   # reorder randomly so ties are less likely to influence results
   log2FC <- sample(log2FC, length(log2FC))
   
@@ -110,7 +116,7 @@ cellMapLocalizationScores <- function(scores.dt, groupCol = "Label", scoreCol = 
   
   #FGSEA
   print (sprintf ("Starting FGSEA on scores in %d groups, (%d values)", ncol(scores.mat), nrow(scores.mat)))
-  sea.dt <- matrixFGSEA (scores.mat, cellMap.sets)
+  sea.dt <- matrixFGSEA (scores.mat, cellMap.sets, ...)
   
   #combine localization scores into scores.dt
   # per-protein localizaitons
@@ -127,6 +133,7 @@ cellMapLocalizationScores <- function(scores.dt, groupCol = "Label", scoreCol = 
 violinsAndScatterLocations <- function (scores.dt, scoreCol = "log2FC", groupCol = "Label", xlimits = NULL, gridFormula = NULL, reorder = TRUE){
   if (reorder){
     sea.mat <- summarizesSEAMatrixFromScoresDT(scores.dt)
+    sea.mat[is.na(sea.mat) | is.infinite(sea.mat)] <- 0.0 
     orderIdx <- dist(sea.mat) %>% hclust %>% as.dendrogram %>% order.dendrogram
     scores.dt[, location := factor(location, levels = rownames(sea.mat)[orderIdx]) ]
   }

@@ -106,6 +106,8 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              border = TRUE,
                              max_pAdjust = 0.01,
                              top_annotation = NULL,
+                             row_names_gp = gpar(fontsize(10)),
+                             column_names_gp = gpar(fontsize = 10),
                              ...){
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
   colors <- Blues(100)
@@ -123,7 +125,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
   hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = border, rect_gp = gpar(col = "grey", lwd = 1),
                                 #cluster_rows = ddr,
                                 column_title = title,
-                                column_names_rot = 90, row_names_gp = gpar(fontsize = 10), column_names_gp = gpar(fontsize = 10),
+                                column_names_rot = 90, row_names_gp = row_names_gp, column_names_gp = column_names_gp,
                                 show_row_dend = show_row_dend, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
                                 row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
                                 top_annotation = top_annotation,
@@ -157,7 +159,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
                                       negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
-                                      annotatePossibleMatches = TRUE, top_annotation = NULL,...){
+                                      annotatePossibleMatches = TRUE, top_annotation = NULL, row_names_gp = gpar(fontsize = 10), ...){
   setorder(simplifiedEnrichTable, p.adjust)
   bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
 
@@ -230,7 +232,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     #}
   }
   
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, row_names_gp = row_names_gp, ...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
@@ -477,4 +479,10 @@ loadCORUMasGMT <- function (path = NULL, species = c("HUMAN", "MOUSE"), idType =
   expanded <- subTable[, .(gene = unlist(strsplit(.SD[[idType]], ";"))), by = . (ComplexID, ComplexName) ]
   # reorder to expected term2gene format
   return(expanded[, .(ont = ComplexName, gene, ComplexID)])
+}
+
+
+limitGMT2PantherGOslim <- function (gmt.dt, fileOrURL = "http://data.pantherdb.org/PANTHER16.0/ontology/PANTHERGOslim.obo"){
+  slimGO <- ontologyIndex::get_ontology(fileOrURL)
+  gmt.dt[ont %in% names(slimGO$name)]
 }

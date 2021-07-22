@@ -1,10 +1,11 @@
 
-
+# this is the original, but current thinking is that OmniPath is probably the best
+# resource moving forward.  See function loadKinaseDataOmniPath May 2021
 loadKinaseData <- function (kinaseDataFile = NULL){
   if (is.null(kinaseDataFile)){
     message ("path to kinaseDataFile is required")
     message ("consider downloading from https://www.biorxiv.org/content/biorxiv/early/2019/11/06/822668.1/DC1/embed/media-1.zip?download=true")
-    message ("Should also be available in bp_utils/data/kinaseSiteList_BachmanGyoriSorger2019.csv")
+    message ("Should also be available in bp_utils/data/kinaseSiteList_BachmanGyoriSorger2019.csv.gz")
     stop()
   }
   
@@ -41,12 +42,59 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "./data/PSP&NetworKIN_Kinas
 
 
 
+# ... arguments are passed to omnipath function. 
+#     #organism (9606 = human, default; 10116 rat; or 10090 mouse)
+#     resources to select source of enz-sub information see get_ptms_resources for options
+
+
+loadKinaseDataOmniPath <- function(species = "HUMAN", ...){
+  species <- toupper(species)
+  organismID <- c(HUMAN = 9606, RAT = 10116, MOUSE = 10090)[species]
+  if(is.na(organismID))
+    stop(species, " not a recognized organism")
+  enzsub <- OmnipathR::import_omnipath_enzsub(organism = organismID,...)
+  setDT (enzsub)
+  # for consistency with loadKinaseData I need columns: "CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"
+
+  if (any(grepl("ProtMapper", enzsub$sources))){
+    message ("OmniPath includes ProtMapper data which has many non-kinases. Removing all enzymes that are not kinases according to org.Hs.eg.db GO:0016301")
+    # get GO kinase list
+
+    if (species == "HUMAN"){
+      library(org.Hs.eg.db)
+      kinaseTable <- AnnotationDbi::select (org.Hs.eg.db, get(c("GO:0016301"), org.Hs.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
+    } else if (species == "MOUSE"){
+      library(org.Mm.eg.db)
+      kinaseTable <- AnnotationDbi::select (org.Mm.eg.db, get(c("GO:0016301"), org.Mm.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
+    } else{
+      stop ("I don't yet know how to find kinases for ", species)
+    }
+
+    kinases <- unique(kinaseTable$SYMBOL)
+    #label and filter into a new table
+    enzsub[, is_kinase := enzyme_genesymbol %in% kinases]
+    enzsub <- enzsub[is_kinase == TRUE]
+  }
+
+    setnames(enzsub, 
+           old = c("enzyme_genesymbol", "substrate_genesymbol", "residue_type", "residue_offset", "substrate"), 
+           new = c("CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"))
+
+    return (enzsub[modification == "phosphorylation"])
+}
+
+kinaseDataToGMT <- function(kd){
+  kd[, .(gene = sprintf ("%s_%s%d", TARGET_GENE_NAME, TARGET_RES, TARGET_POS),
+         kinase = CTRL_GENE_NAME,
+         protein = sprintf ("%s_%s%d", TARGET_UP_ID, TARGET_RES, TARGET_POS))]
+}
 
 
 
 # Compute enrichment scores based on gene set enrichment analysis.
 # uses data table structure that is built and returned by kinaseActivity
-kinaseActivity.sea <- function(kinaseMapped, nperm=1000, gseaWeightParam = 1, nproc=1, fullData = NULL, center = FALSE, ...){
+kinaseActivity.sea <- 
+  function(kinaseMapped, nperm="not_used", gseaWeightParam = 1, nproc=1, fullData = NULL, center = FALSE, ...){
   stopifnot(length(unique(kinaseMapped$Label)) < 2) # we should only be computing this over a single label
   
   #collapse log2FC down to a single value per phSiteCombo
@@ -70,24 +118,16 @@ kinaseActivity.sea <- function(kinaseMapped, nperm=1000, gseaWeightParam = 1, np
   sets <- split(setsTable$phSiteCombo,
                 setsTable$CTRL_GENE_NAME)
   
-
-  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, nperm = nperm, gseaParam=gseaWeightParam, nproc = nproc, ...)
+  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC,  gseaParam=gseaWeightParam, nproc = nproc, ...)  #nperm = nperm
   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
   return (seaRes)
 }
 
 
 
-
-
-
-
-
-
-
 kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv.gz",
                             plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE, do.sea = FALSE,
-                            sea.center = FALSE, sea.weightParam = 1){
+                            sea.center = FALSE, sea.weightParam = 1, sea.nproc = 1, subsetColumn = NULL){
   
   
   # deal with columns ... this is ugly ... can be improved
@@ -118,16 +158,25 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   
   # done with columns
   
-  
-  
   if ("representative" %in% colnames(log2FCData) & any(log2FCData$representative == FALSE)){
     warning ("data.table includes a 'representative' column, but some are set to FALSE. Did you forget to pre-filter?")
   }
     
   if (is.null(kinaseData)){
     kinaseData <- loadKinaseData (kinaseDataFile)
+    #message ("Loading kinase data from OmniPath")
+    #kinaseData <- loadKinaseDataOmniPath()
+  }
+
+  # redundancy check the kinaseData based on mergeYCols
+  nrowFull <- nrow(kinaseData)
+  nrowUnique <- nrow(unique(kinaseData[,c("CTRL_GENE_NAME", mergeYCols), with = FALSE]))
+  if(nrowUnique < nrowFull){
+    message (nrowFull - nrowUnique, " redundant rows will be dropped from kinase knowledge table; selecting first of each redundant set")
+    kinaseData <- kinaseData[, .SD[1], by  = c("CTRL_GENE_NAME", mergeYCols)]
   }
   
+    
   # clean up data
   ## remove NA and infinite
   cleanData <- log2FCData[!is.na(log2FC) & is.finite(log2FC)]
@@ -142,6 +191,11 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
  
   kinaseMapped <- merge (cleanData, kinaseData, by.x=mergeXCols, by.y=mergeYCols)
   
+  cat (sprintf("%d sites quantified mapped to %d rows in kinase-target data file results in %d kinase-site-log2FC relationships from %d phSiteCombo and %d kinases\n",
+               nrow(cleanData), nrow(kinaseData), nrow(kinaseMapped), kinaseMapped[,length(unique(phSiteCombo))], kinaseMapped[, length(unique(CTRL_GENE_NAME))]))
+
+
+    
   if (uniprot) kinaseMapped[, Gene_Name := uniprot]
   if (! "aa" %in% colnames(kinaseMapped)) kinaseMapped[,aa := ""]
   
@@ -156,8 +210,17 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   #each kinase mean will be compared to global mean
   fullMean <- mean(cleanData[,log2FC])
   
+  subsetSelector <-TRUE  #select all
+  if (!is.null(subsetColumn)){
+    subsetSelector <- kinaseMapped[[subsetColumn]] == TRUE
+  }else{
+    subsetSelector <- rep(TRUE, nrow(kinaseMapped))
+  }
+  
+  cat (sprintf("Computing using %d rows in site-kinase-log2FC table\n",sum(subsetSelector)))
+  
   # summarize per kinase, Z score based on standard error of the mean log2FC per kinase
-  scores <- kinaseMapped[,.(Z = (unique(.SD)[,mean(log2FC)] - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD, 
+  scores <- kinaseMapped[subsetSelector][,.(Z = (unique(.SD)[,mean(log2FC)] - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD, 
                             N= length(unique(phSiteCombo)),#.N,  # don't double count when two sites are in the same peptide 
                             meanLog2FC  = mean(log2FC),
                             sites = paste(unique(paste(Gene_Name, paste0(aa, pos), sep="_")), collapse=",") ),  # 'unique' because some sites will occur multiple times in different phospho-combos
@@ -172,7 +235,8 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   
    
   if (do.sea == TRUE){
-    seaScores <- kinaseActivity.sea(kinaseMapped, fullData = cleanData, center = sea.center, gseaWeightParam = sea.weightParam, nperm = 10000)
+    if (!is.null(subsetColumn)) message ("subsetColumn does not work with SEA. SEA scores will not be subsetted")
+    seaScores <- kinaseActivity.sea(kinaseMapped, fullData = cleanData, center = sea.center, gseaWeightParam = sea.weightParam,  nproc = sea.nproc) #nperm = 10000,
     setnames(seaScores, old = c("pval", "padj"), new = paste0(c("pval", "padj"), ".sea"))
     scores <- merge (scores, seaScores, by.x = c("CTRL_GENE_NAME"), by.y = c("pathway"),suffixes = c("", ".sea"), all = TRUE)
   }
@@ -203,7 +267,8 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
                                     max_pValue = 1.0, max_fdr = 1.0, min_N = 2,
                                     sigKinases = NULL, reverse = FALSE,
                                     useMonoFont = FALSE, useViolin = FALSE,
-                                    useSEA = FALSE, reorder = TRUE){
+                                    useSEA = FALSE, reorder = TRUE,
+                                    ncol = 3){
   by.col <- c("CTRL_GENE_NAME")
   
   if ("Label" %in% colnames(kinaseMapped)){
@@ -245,10 +310,10 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
   
   if (reverse){
     p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = sigScore, col = sigScore)) + 
-      facet_wrap(facets = ~CTRL_GENE_NAME, ncol = 3)
+      facet_wrap(facets = ~CTRL_GENE_NAME, ncol = ncol)
   }else{
     p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = sigScore, col = sigScore)) + 
-      facet_wrap(facets = ~Label, ncol = 3)
+      facet_wrap(facets = ~Label, ncol = ncol)
   }
   if (useSEA){
     p <- p + aes(fill = sigScore.sea, col = sigScore.sea)
