@@ -159,7 +159,8 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
                                       negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
-                                      annotatePossibleMatches = TRUE, top_annotation = NULL, row_names_gp = gpar(fontsize = 10), ...){
+                                      annotatePossibleMatches = TRUE, top_annotation = NULL, row_names_gp = gpar(fontsize = 10),
+                                      upperThreshold  = NULL,...){
   setorder(simplifiedEnrichTable, p.adjust)
   bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
 
@@ -193,7 +194,9 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   
   main.mat <- -log10(as.matrix(main.wide, rownames = "Description"))
   main.mat[is.na(main.mat)] <- 0
-  main.mat[main.mat > 5] <- 5
+  if (!is.null(upperThreshold)){
+    main.mat[main.mat > upperThreshold] <- upperThreshold
+  }
   if (all(grepl("^GO_", rownames(main.mat)))){
     rownames(main.mat) <- fixMsigdbGONames(rownames(main.mat))
   }
@@ -220,9 +223,12 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
   }
 
   if (annotatePossibleMatches==TRUE){
-    genesInUniverseCounts <- unique(fullEnrichTable[, .(group, geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio)))])
+    genesInUniverseCounts <- unique(fullEnrichTable[, .( geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio))), by = c(groupColumn)])
+    if (nrow(genesInUniverseCounts) != ncol(main.mat)){
+      stop("non-unique gene counts per group. If you didn't combine multiple differently grouped enrichments, this is unexpected. If it is, set annotatePossibleMatches = FALSE")
+    }
     cols <- colnames(main.mat)
-    setkey(genesInUniverseCounts, group)
+    setkeyv(genesInUniverseCounts, groupColumn)
     topBars <- HeatmapAnnotation(`Group Sizes` = anno_barplot ( genesInUniverseCounts[cols, geneCount] ))
     if (!is.null(top_annotation)){
       warning("over writing non-null top annotation with possible matches")
