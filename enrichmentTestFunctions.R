@@ -224,7 +224,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 
   if (annotatePossibleMatches==TRUE){
     genesInUniverseCounts <- unique(fullEnrichTable[, .( geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio))), by = c(groupColumn)])
-    if (nrow(genesInUniverseCounts) != ncol(main.mat)){
+    if (nrow(genesInUniverseCounts) != length(unique(genesInUniverseCounts$group))){
       stop("non-unique gene counts per group. If you didn't combine multiple differently grouped enrichments, this is unexpected. If it is, set annotatePossibleMatches = FALSE")
     }
     cols <- colnames(main.mat)
