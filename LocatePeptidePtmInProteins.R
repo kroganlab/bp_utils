@@ -113,7 +113,8 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   mapper[, ptmPositions := stringr::str_locate_all(modPeptideLC.PTM, stringr::fixed (ptmFormat))]
   
   # we have a list of matrices. one matrix per row. expand as many rows as there are sites in the row
-  mapper.expanded <- mapper[, .(pepSitePTM = ptmPositions[[1]][,"start"] -
+  mapper.expanded <- mapper[lapply(ptmPositions, nrow) > 0,
+                            .(pepSitePTM = ptmPositions[[1]][,"start"] -
                                   # subtract 1 because the (ph) labels the preceding AA, and subtract an additional 4 per each preceding mod
                                   seq(from = 1, by =  stringr::str_length(ptmFormat), length.out =nrow(ptmPositions[[1]]))  ),
                             by = .(fragPipeProteinName, uniprot, modPeptide)]
@@ -133,6 +134,8 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   if (downloadFromWeb){
     web.up.dt <- downloadUniprotSequences (missingUniprots)
     up.dt <- rbind (fasta.dt, web.up.dt)
+  }else{
+    up.dt <- fasta.dt
   }
   
   
