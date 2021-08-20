@@ -133,6 +133,42 @@ normalizeByMedianPolish.evidenceFile <- function(inFilePath, standards = NULL, d
 
 
 
+# Normalize an evidence-mss.txt file
+#' @param  inFilePath  : the path to the evidence file
+#' @param  standards   :  a vector of proteinIDs to normalize with. Must match IDs in "Leading razor protein" column
+#' @param  doPlots     : makes plots that show progress, to the default graphics device.  Not recommended with standards = NULL
+#' @param  outFilePath : where to write the output.  If not included it will be a file with similar name as inFilePath
+normalizeByMedianPolish.evidenceMSS <- function(inFilePath, standards = NULL, doPlots = FALSE, outFilePath = NULL){
+  if (is.null(outFilePath))
+    outFilePath <- gsub ("(\\.txt)?$", ".MP_normalized.txt", inFilePath)
+  
+  ev <- fread (inFilePath, integer64= "double")
+  colNames <- c("runID", "proteinID", "featureID", "logIntensity")
+  # avoid over-writing pre-existing columns
+  stopifnot (!any(colNames %in% colnames(ev)))
+
+  # define columns that normalizeByMedianPolish depends on
+  ev[, c("runID", "proteinID", "featureID", "logIntensity") :=
+       .(as.character(Run),
+         ProteinName,
+         paste(ProteinName, PeptideSequence, PrecursorCharge, sep = "_"),
+         log2(Intensity))
+  ]
+  
+  ev.norm <- normalizeByMedianPolish (ev, standards = standards, doPlots = doPlots)
+  
+  # clean up
+  ev.norm[, Intensity.prenormalization := Intensity]
+  ev.norm[, Intensity := 2^normLogIntensity]
+  ev.norm[, c(colNames, "normLogIntensity") := rep(NULL, length(colNames))]
+  
+  cat (sprintf("Writing normalized evidence file to %s\n", outFilePath))
+  fwrite (ev.norm, outFilePath, sep = "\t")
+  invisible (ev.norm)
+}
+
+
+
 
 
 
