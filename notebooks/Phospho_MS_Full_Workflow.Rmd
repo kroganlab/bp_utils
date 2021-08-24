@@ -1,32 +1,15 @@
 ---
 title: "R Notebook"
-output:
-  pdf_document: default
-  html_notebook: default
+output: html_notebook
 ---
-```{r}
-library (data.table)
-library (ComplexHeatmap)
-library (ggplot2)
-
-
-today <- function(){
-  format(Sys.time(), "%Y_%m_%d")
-}
-DateFileName <- function(x){
-  name <-   paste0(today(), "_", x)
-  print (name)
-  return (name)
-}
-```
-
+ 
 # Introduction
 
 Steps:
 
 1. "Save as..." file to a new meaningful name, including some indication of the data you're processing.
 2. Edit ` paths ` and ` contrastPatterns` in Configuration section below, including options in "Prepare for artMS".
-3. First run artMS/MSstats by running first four code blocks manually.
+3. First run artMS/MSstats by running first  code blocks manually.
 4. Do something useful while waiting for MSstats to finish (cup of coffee, say hi to your kids/parents, pet your dog).
 5. Once MSstats is finished,  run the remaining blocks.  "Run All" from the Run menu is probably easiest.
 6. Inspect artMS quality control plots (in ` outputDirectory`) and the heatmap plots here for problems in the data.
@@ -40,29 +23,119 @@ Tips:
 
 
 
+# Utility functions and library calls
+Run this then jump to *Configuration* on line 113
+```{r}
+library (data.table)
+library (ComplexHeatmap)
+library (ggplot2)
+rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90))
+
+
+today <- function(){
+  format(Sys.time(), "%Y_%m_%d")
+}
+DateFileName <- function(x){
+  name <-   paste0(today(), "_", x)
+  print (name)
+  return (name)
+}
+
+ScriptNamedDir <- function(scriptName = NULL){
+  if(is.null(scriptName))
+    scriptName <- rstudioapi::getActiveDocumentContext()$path
+  if (is.null (scriptName) || scriptName == "")
+    stop("No script name found -- you may need to save this file first")
+  outDir <- gsub(".R(md)?$", "_data", scriptName)
+  if (!dir.exists(outDir)){
+    message ("Creating directory associated with ", scriptName,", at ", outDir)
+    dir.create(outDir)
+  }
+  return(outDir)
+}
+
+
+ScriptAndDatedFileName <- function(x, scriptName = NULL){
+  dir <- ScriptNamedDir(scriptName)
+  fileName <- DateFileName(x)
+  path <- file.path(dir, fileName)
+  print (path)
+  return (path)
+}
+
+GetLatestScriptFile <- function(x, scriptName=NULL){
+  stopifnot (length(x) == 1)
+  dir <- ScriptNamedDir(scriptName)
+  filePattern <- paste0("^\\d{4}_\\d{2}_\\d{2}_", x, "$", collapse = "")
+  filesFound <- list.files(dir, filePattern)
+  stopifnot (length(filesFound) > 0)
+  if (length(filesFound) > 1){
+    message ("Multiple files  with matching names found.  Using the last one")
+    print (filesFound)
+  }
+  return (file.path(dir, tail(filesFound, 1)))
+} 
+
+PDFBackupFileName <- function(prefix = ""){
+  scriptDir <- ScriptNamedDir()
+  imageDir <- file.path(scriptDir, "pdfs")
+  if (!dir.exists(imageDir)) dir.create(imageDir)
+  now <- format(Sys.time(),  "%Y_%m_%d__%H_%M__%S")
+  path <- file.path (imageDir, sprintf("%s%s.pdf", prefix, now))
+  while (file.exists(path)){
+    seconds <- unlist(strsplit (gsub("\\.pdf$", "", basename(path)), split = "_"))[8]
+    seconds <- as.numeric(seconds) + 0.1
+    path <- gsub ("[0-9.]+$", as.character(seconds), path)
+  }
+  return (path)
+}
+
+BackupAsPDF <- function(graphics, prefix = ""){
+  path <- PDFBackupFileName(prefix)
+  dimensions <- dev.size(units = "in")
+  
+  # handle my enrichment heatmaps that are part of a list
+  if (! ("ggplot" %in% class(graphics) | "Heatmap" %in% class(graphics) | "HeatmapList" %in% class(graphics))){
+    g <- graphics$hmList    
+  }else{
+    g <- graphics
+  }
+  
+  print (sprintf("Writing image to  %s", path))
+  cairo_pdf(path, width = dimensions[1], height = dimensions[2])
+    print (g)
+  dev.off()
+  return (graphics)
+}
+
+```
+
 # Configuration
-Edit these paths to control all process below. 
 
 ```{r}
 #the location on your computer where bp_utils can be found; clone or download from link at https://github.com/kroganlab
 githubKroganLab <- "~/UCSF/kroganlab"
 
 # the input data from spectronaut, in "MSstats" format or similar
-spectronautPeptideFile <- NULL# "/Users/ben/Box/5HT2A data analysis/Phosphoproteomics/Spectronaut results_local 0.75/LSD_Phospho Report.xls"
+spectronautPeptideFile <- "/Users/ben/Box/5HT2A data analysis/HTR7/PH/20210805_HTR7_PH_targetDIA_0_Report.xls" 
+
 # if spectronautPeptidefile is set to NULL, set maxQuantFiles here...
 maxQuantEvFile <- "/Users/ben/Box/5HT2A data analysis/5-HT/Phospho/DDA/evidence.txt"
 keysFile <- "/Users/ben/Box/5HT2A data analysis/5-HT/Phospho/DDA/keys.txt"
 
 # most output will appear within here (all?--that's the goal)
-outputDirectory <- "~/UCSF/kroganlab/BenPolacco/random/xiaofang/"
+jobName <- "PH_work"
+outputDirectory <- ScriptAndDatedFileName(jobName)
 
-# most ouptut will have this as a prefix (all?--that's a goal)
-jobPrefix <- "HT5.PH.DDA"
+# don't change these (unless you know what you're doing):
+outFilePrefix <- outputDirectory
+dir.create( outFilePrefix, recursive = TRUE, showWarnings = FALSE)
+
 
 # a list of regular expressions to select the contrasts from the full all-by-all set.  
 # This will be used by the R function grep, so all regular expressions that it understands are allowed.
 # set to NULL for a non-redundant (A-B but not B-A) all-by-all set
-contrastPatterns <- NULL #c("LSD.*-LSD_0", "LSD.*-ACN_60")
+contrastPatterns <- c("(DMSO|Lis_..)-Lis_00", "(ACN|Psi_..)-Psi_00") #NULL #c("LSD.*-LSD_0", "LSD.*-ACN_60")
 
 # path to the proteome fasta file that shouldl have all proteins mentioned in spectronaut.
 # used by artMS to get sequence positions for PTM
@@ -84,9 +157,6 @@ runsToSkip <- c() #c("LP1_11_phos_DIA_124.raw")
 
 
 
-# don't change these (unless you know what you're doing):
-outFilePrefix <- file.path(outputDirectory, DateFileName(jobPrefix))
-dir.create( outFilePrefix, showWarnings = FALSE)
 
 originalWorkingDirectory <- getwd()
 
@@ -101,6 +171,7 @@ if (length(conditionsToSkip) >0 | length(runsToSkip) > 0){
   }
 
 ```
+
 
 
 ## Prepare for artMS
@@ -126,7 +197,24 @@ cf$qc$basic <- as.integer(1)
 
 ```
 
+# Filter spectronaut PH data using PTMAssayProbability
 
+```{r}
+if (!is.null(spectronautPeptideFile) & site.PH_or_UB != "AB"){
+  filteredSpecFile <- ScriptAndDatedFileName("SpectronautFeaturesPTMProbFiltered.csv")
+  if(!file.exists(filteredSpecFile)){
+    specFile <- fread (spectronautPeptideFile)
+    
+    # mark frequnetly observed features (>10 observations) as halfcomplete or not.
+    # halfComplete == when observed, it must be prob>0.75 more than half the time
+    halfCompleteSet <- specFile[, .(totalObs = .N, numPass0.75 = sum(EG.PTMAssayProbability > 0.75)), by = .(ProteinName, PeptideSequence, PrecursorCharge)][numPass0.75 > totalObs/2 & totalObs > 10]
+    specFile[halfCompleteSet, halfComplete := TRUE, on = c("ProteinName", "PeptideSequence", "PrecursorCharge")]
+    # we accept all things with prob > 0.75 but additionally those that are "halfComplete" regardless of prob 
+    fwrite (specFile[EG.PTMAssayProbability > 0.75 | halfComplete == TRUE],  filteredSpecFile)
+    spectronautPeptideFile <- filteredSpecFile
+  }
+}
+```
 
 
 
@@ -185,32 +273,33 @@ This is also useful if you want to change the contrasts, in which case you shoul
 
 
 
-# Reloading output from another day?
-
-My file naming puts today's date in filenames.  That is convenient to prevent you from later over-writing a previous day's work, but potentially it makes some of the functions below fail if you revisit on a later day because they may be looking for a file with today's date, but artMS/MSstats ran yesterday.
-
 ```{r}
+
+outputDirectory <- GetLatestScriptFile(jobName)
+
+
 # paths defined for the various files used in analyses below here:
-results.txt <- file.path(outFilePrefix, "output", "results.txt") 
-mss.normalized.txt <-file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
-protQuant.txt <- file.path(outFilePrefix, "output", "results_RunLevelData.txt") 
+results.txt <- file.path(outputDirectory, "output", "results.txt") 
+mss.normalized.txt <-file.path(outputDirectory, "output", "results-mss-normalized.txt") 
+protQuant.txt <- file.path(outputDirectory, "output", "results_RunLevelData.txt") 
+# 
+# previousDate <- "2020_10_26" # change this if you did the above on a different day and simply didn't rerun artMSQuantification
+# 
+# # first try with today's date, if it fails use previousDate
+ #if(!file.exists ( results.txt) ){
+   
+#   outFilePrefix <- file.path(outputDirectory, sprintf("%s_%s", previousDate, jobPrefix ))
+#   
+#   results.txt <- file.path(outFilePrefix, "output",  "results.txt")
+#   if(!file.exists ( results.txt) ){
+#     stop("no results file found at ", results.txt)
+#   }
+#   
+#   mss.normalized.txt <- file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
+#   protQuant.txt <- file.path(outFilePrefix, "output",  "results_RunLevelData.txt") 
+# }
 
-previousDate <- "2020_10_26" # change this if you did the above on a different day and simply didn't rerun artMSQuantification
-
-# first try with today's date, if it fails use previousDate
-if(!file.exists ( results.txt) ){
-  outFilePrefix <- file.path(outputDirectory, sprintf("%s_%s", previousDate, jobPrefix ))
-  
-  results.txt <- file.path(outFilePrefix, "output",  "results.txt")
-  if(!file.exists ( results.txt) ){
-    stop("no results file found at ", results.txt)
-  }
-  
-  mss.normalized.txt <- file.path(outFilePrefix, "output", "results-mss-normalized.txt") 
-  protQuant.txt <- file.path(outFilePrefix, "output",  "results_RunLevelData.txt") 
-}
-
-
+stopifnot(file.exists(results.txt))
 message ("using output files associated with ", results.txt)  
 ```
 
@@ -242,7 +331,7 @@ p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) +
   theme_bw() 
 
 
-print (p)
+BackupAsPDF (p, "Volcanos_")
 
 
 results[,c("posGroup", "negGroup") := tstrsplit(Label, split = "-")]
@@ -258,7 +347,7 @@ p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) +
   theme_bw() 
 
 
-print (p)
+BackupAsPDF (p, "Volcanos_grid_")
 
 
 ```
@@ -298,49 +387,22 @@ ggplot (normPepInt[PEPTIDE %in% completePeptideIons], aes(x=interaction(GROUP_OR
 
 
 # Heatmap view of peptide intensity
-```{r, fig.width =6, fig.height=12}
-#mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
-normPepInt <- fread (mss.normalized.txt)
 
-# remove low intensity that we think are as good as missing values
-minTrustedIntensity <- 2^5
-normPepInt[INTENSITY < minTrustedIntensity, INTENSITY := NA]
-
-normPepInt[, logCenteredIntensity := log2(INTENSITY/(median(INTENSITY, na.rm=TRUE))), by = PEPTIDE]
-normInt.mat <- as.matrix(dcast(normPepInt, PEPTIDE~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "PEPTIDE")
-
-normInt.mat.noNA <- normInt.mat
-normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
-ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
-
-
-Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
-        name = "log2.norm.int",
-        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")))
-
-
-Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
-        name = "log2.norm.int",
-        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
-        cluster_columns = FALSE, row_title = sprintf("%d peptides", nrow(normInt.mat)))
-
-```
-
-
-
-
-```{r, fig.width =6, fig.height=12}
+```{r, fig.width =6, fig.height=8}
 #mss.normalized.txt <-file.path(paste0(outFilePrefix, "_output", collapse=""), "results-mss-normalized.txt") 
 normPepInt <- fread (mss.normalized.txt)
 
 normPepInt[, logCenteredIntensity := log2(INTENSITY/(median(INTENSITY, na.rm=TRUE))), by = PEPTIDE]
 normInt.mat <- as.matrix(dcast(normPepInt, PEPTIDE~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "PEPTIDE")
 
-#optionally subset
-#normInt.mat <- normInt.mat[sample(nrow(normInt.mat), 1000),]  # select 1000 rows
-#or
+# subset to complete cases
 normInt.mat <- normInt.mat[complete.cases(normInt.mat),]  # select rows with no missing values
 
+if (nrow(normInt.mat) > 2000){
+  normInt.mat <- normInt.mat[sample(nrow(normInt.mat), 1000),]  # select 1000 rows
+}
+
+
 normInt.mat.noNA <- normInt.mat
 normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
 ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
@@ -356,47 +418,66 @@ Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = FALSE,
 
 ```
 
-# Heatmap view of significant changers
-```{r, fig.width = 8, fig.height=12}
+```{r, fig.width = 8, fig.height = 6}
+normPepInt <- fread (mss.normalized.txt)
 
-#results.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results.txt") 
-results <- fread (results.txt)
+normPepInt[, logCenteredIntensity := log2(INTENSITY/(median(INTENSITY, na.rm=TRUE))), by = PEPTIDE]
+normInt.mat <- as.matrix(dcast(normPepInt, PEPTIDE~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "PEPTIDE")
 
-#protQuant.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results_RunLevelData.txt") 
-protQuant <- fread (protQuant.txt)
-source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
-protQuant[,gene := multiUniprotSites2multiGeneSites(Protein)]
+# subset to complete cases
+normInt.mat <- normInt.mat[complete.cases(normInt.mat),]  # select rows with no missing values
 
 
-#subset to the significant proteins
-sigProteins <- results[abs(log2FC) > 1 & pvalue < 0.01,
-                       unique(Protein)]
-protQuant <- protQuant[Protein %in% sigProteins,]
+
+colInfo <- data.table(colname = colnames(normInt.mat))
+# something like, this depends on the structure of your condition names
+colInfo[,c("treat", "time", "rep") := tstrsplit(colname, "[_.]", keep = c(1,2,5)) ]
 
 
-protQuant[, logCenteredIntensity := LogIntensities-median(LogIntensities, na.rm=TRUE), by = Protein]
-normInt.mat <- as.matrix(dcast(protQuant, gene~GROUP_ORIGINAL+SUBJECT_ORIGINAL, value.var = "logCenteredIntensity"), rownames = "gene")
-
-normInt.mat.noNA <- normInt.mat
-normInt.mat.noNA[is.na(normInt.mat.noNA)] <- quantile(normInt.mat, 0.001, na.rm=TRUE)
-ddr <- as.dendrogram(hclust(dist(normInt.mat.noNA)))
 
 
-Heatmap(normInt.mat, cluster_rows = ddr, 
-        name = "log2.norm.int",
-        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
-        show_row_names = TRUE,
-        row_names_gp = gpar(fontsize = 6))
-Heatmap(normInt.mat, cluster_rows = ddr, show_row_names = TRUE,
-        name = "log2.norm.int",
-        col = circlize::colorRamp2(breaks = c(-2, 0, 2), colors = c("blue", "white", "red")),
-        cluster_columns = FALSE,
-        row_names_gp = gpar(fontsize = 6))
+title <- NULL
+#PCA
+pcaOut <- prcomp(t(normInt.mat))
+pcaDT <- as.data.table(pcaOut$x, keep.rownames=TRUE)
+
+pcaPercentVar <- round(100 * (pcaOut$sdev^2)/sum(pcaOut$sdev^2), 1)
+
+pcaDT <- merge (pcaDT, colInfo, by.x = "rn", by.y = "colname", all.x = TRUE)
+
+#plot first two components
+p <- ggplot (pcaDT, aes(x=PC1, y=PC2, color=rep, fill = time, shape = treat)) + 
+  geom_point(alpha=1.0, size=4) + 
+  ggrepel::geom_text_repel(aes(label=rn), show.legend = FALSE, size = 3) +
+  theme_bw() + 
+  xlab (sprintf ("PC1, %.1f%%", pcaPercentVar[1])) + 
+  ylab (sprintf ("PC2, %.1f%%", pcaPercentVar[2])) + 
+  ggtitle (sprintf ("PCA %s using %d features (log intensity)", title, nrow(normInt.mat))) +
+  scale_color_brewer(type = "qual", palette = "Dark2") +
+  scale_shape_manual(values = 21:25) +
+  #scale_fill_manual(values = c(`05` = "gray", `30` = "black")) +
+  guides(fill = guide_legend(override.aes = list(shape =21) ) ,
+         color = guide_legend(override.aes = list(shape =21) ) )
+BackupAsPDF(p, "PCA_Complete_Features")
 
 
+# or basic
+
+p <- ggplot (pcaDT, aes(x=PC1, y=PC2, label = rn)) + 
+  geom_point(alpha=1.0, size=4) + 
+  ggrepel::geom_text_repel(aes(label=rn), show.legend = FALSE, size = 3) +
+  theme_bw() + 
+  xlab (sprintf ("PC1, %.1f%%", pcaPercentVar[1])) + 
+  ylab (sprintf ("PC2, %.1f%%", pcaPercentVar[2])) + 
+  ggtitle (sprintf ("PCA %s using %d features (log intensity)", title, nrow(normInt.mat)))
+  # scale_color_brewer(type = "qual", palette = "Dark2") +
+  # scale_shape_manual(values = 21:25) +
+  # #scale_fill_manual(values = c(`05` = "gray", `30` = "black")) +
+  # guides(fill = guide_legend(override.aes = list(shape =21) ) ,
+  #        color = guide_legend(override.aes = list(shape =21) ) )
+BackupAsPDF(p, "PCA_Basic_Complete_Features")
 ```
 
-# PCA
 
 
 # Kinase analysis
@@ -426,8 +507,8 @@ names(kinActList) <- labels
 kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
 kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
 
-kinaseSummaryScores.csv <- file.path(outFilePrefix, "output", "kinaseSummaryScores.csv")
-kinaseSubstrateData.csv <- file.path(outFilePrefix, "output", "kinaseSubstrateData.csv")
+kinaseSummaryScores.csv <- ScriptAndDatedFileName("kinaseSummaryScores.csv")
+kinaseSubstrateData.csv <- ScriptAndDatedFileName("kinaseSubstrateData.csv")
 message (sprintf("Writing kinase output files to\n\t%s\n\t%s", kinaseSummaryScores.csv, kinaseSubstrateData.csv))
 
 fwrite (kinActFull.scores, kinaseSummaryScores.csv)
@@ -436,8 +517,8 @@ fwrite (kinActFull.mapped, kinaseSubstrateData.csv)
 ```
 
 ## Heatmap of significant kinases
-```{r}
-sigKinases <-  kinActFull.scores[fdr.BH < 0.2 & N >= 2, unique(CTRL_GENE_NAME)]
+```{r, fig.width = 6, fig.height= 9}
+sigKinases <-  kinActFull.scores[fdr.BH < 0.05 & N >= 2, unique(CTRL_GENE_NAME)]
 
 sigKinase.mat.z <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "Z"),
                               rownames = "CTRL_GENE_NAME")
@@ -446,16 +527,31 @@ sigKinase.mat.N <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKin
                                   rownames = "CTRL_GENE_NAME")
 
 
-Heatmap (sigKinase.mat.z, 
+hm <- Heatmap (sigKinase.mat.z, 
          cluster_columns=TRUE, 
          name = "Kinase Z Score",
-         column_split = tstrsplit(colnames(sigKinase.mat.z), split="_")[[1]],
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="[-_.]")[[1]],
          col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
          cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.na(sigKinase.mat.N[i,j])){
                                     grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
                                   }
                                 })
+
+BackupAsPDF(hm, prefix = "Heatmap_SigKinases")
+
+hm <- Heatmap (sigKinase.mat.z, 
+         cluster_columns=FALSE, 
+         name = "Kinase Z Score",
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="[-_.]")[[1]],
+         col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
+         cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(sigKinase.mat.N[i,j])){
+                                    grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                })
+
+BackupAsPDF(hm, prefix = "Heatmap_SigKinases_noColCluster")
 
 
 ```
@@ -497,7 +593,6 @@ universe <- unique(results$gene)
 source (file.path(githubKroganLab, "bp_utils", "enrichmentTestFunctions.R"))
 
 gmt <- loadGmtFromBioconductor(dbName = "org.Hs.eg.db", ontology = "ALL", keyType = "SYMBOL")
-gmt <- gmt[,.(ont = description, gene = gene)]
 
 ```
 ## run enrichment tests
@@ -556,6 +651,5 @@ a <- enrichHeatmapBestPerGroup(simp[[1]], simp[[2]],
 # dev.off()
 
 
-
+BackupAsPDF(a, "PH_Protein_enrichments")
 ```
-
