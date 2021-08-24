@@ -1,6 +1,115 @@
 library (data.table)
 
 
+#' @param groupTable data.table with columns for gene symbols and group designtations
+#' @param geneColumn character name of column which has gene symbols (or uniprot depending on gmt)
+#' @param groupColumns character vector (>1 allowed) of factor-like columns that defines groups
+#' @param term2gene.gmt the term2gene table.  First two columns (regardless of names) are used as term, gene
+#' @param universe a character vector of gene IDs that define the background universe
+#' @param numProcessors integer. Values > 1 enable multiprocessing
+
+enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("group"),
+                           term2gene.gmt = NULL, universe = NULL, numProcessors = 1){
+  
+  if (is.null(term2gene.gmt)){
+    stop ("A term2gene.gmt is required. 1st column term, 2nd column gene IDs (or uniprots etc)")
+  }
+  if (is.null(universe)){
+    warn("No universe chosen. Using the full set of genes in term2gene.gmt.  This is likely inappropriate")
+    universe <- unique(term2gene.gmt[,2])
+  }
+  
+  subTables <- split (groupTable, by = groupColumns, flatten = TRUE, drop = TRUE)
+  
+  message ("Computing enrichments on ", length(subTables), " groups defined by ", paste0(groupColumns, collapse = ","))
+  enrichList <-  pbapply::pblapply(subTables, 
+                          function(subDT){
+                            setDT(as.data.frame(clusterProfiler::enricher(unique(subDT[[geneColumn]]),
+                                                         pAdjustMethod="fdr",
+                                                         universe=universe,
+                                                         TERM2GENE =  term2gene.gmt,
+                                                         qvalueCutoff = 1.1,
+                                                         pvalueCutoff = 1.1)))
+                          },
+                          cl=numProcessors)
+  
+  enrichTable <-  rbindlist(enrichList, idcol= paste0(groupColumns, collapse = "."))
+  return (enrichTable)
+}
+
+
+simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTable, gmt, groupColumn=NULL, 
+                                                       cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01,
+                                                       termColumn = "pathway", pvalueColumn = "padj"){
+  if (length(unique(enrichResultsTable[[termColumn]])) < 2){
+    message ("Nothing to simplify")
+    return (list (enrichResultsTable, data.frame()))
+  }
+  setDT(enrichResultsTable); setDT(gmt)
+  
+  ##Select Significant Terms
+  target_overrep_sig <- enrichResultsTable[enrichResultsTable[[pvalueColumn]] < max(max_pAdjust,0.05),]#qvalue < 0.01]
+
+  ##Prepare Significant GO Term Jaccard Similarity Matrix
+  sig_go_terms <- unique(target_overrep_sig[[termColumn]])
+  
+  if (!is.null(groupColumn)){
+    message ("Computing universal gene overlap between ", length(sig_go_terms), " significant terms from ", length(unique(enrichResultsTable[[groupColumn]])), " ", groupColumn, "(s)")
+  }else{
+    message ("Computing universal gene overlap between ", length(sig_go_terms), " significant terms")
+  }
+
+  #cluster and divide the gmt based
+  gmt.subset <- gmt[ont %in% sig_go_terms, .(ont=factor(ont), gene=factor(gene))]
+  termByGeneMat <-  Matrix::sparseMatrix(as.integer(gmt.subset$ont), as.integer(gmt.subset$gene), 
+                                         dimnames=list(levels(gmt.subset$ont), 
+                                                       levels(gmt.subset$gene)))
+  
+  #go_dist_mat <- dist(termByGeneMat, method="binary")
+  # maybe this is faster?  I haven't clocked it
+  go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
+  
+  hc <- hclust(go_dist_mat)
+  
+  clusters <- cutree(hc, h=cutHeight)
+  clusters <- data.table (cluster = as.numeric(clusters), ID = attributes(clusters)$names )
+  
+  message ("GO terms clustered into ", max(clusters$cluster), " clusters")
+  
+  ## go gene set lengths
+  gmt.setLengths <- gmt[,.(setSize = length(unique(gene))), by = ont]
+  clusters <- merge (clusters, gmt.setLengths, by.x="ID", by.y="ont")
+  
+  
+  ## local gene set lengths  -- this will only count those genes that make it into an enriched list
+  # specific to enricher output...
+
+  # id.gene.long <- enrichResultsTable[,.(ID, gene = unlist(strsplit(geneID, "/"))), by = seq_len(nrow(enrichResultsTable))]
+  # genesPerTerm <- id.gene.long[,.(localSetLength=length(unique(gene))), by = ID]
+  # clusters <- merge (clusters, genesPerTerm, by.x="ID", by.y="ID")
+  #setorder(clusters, -localSetLength)  # the tie breaker
+  
+  clusterInfo <- merge (enrichResultsTable, clusters, by.x = termColumn, by.y = "ID")
+  
+  clusterInfo[,maxSet := max (setSize), by = c("cluster", groupColumn)]
+
+  if (broadest){
+    winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners[[termColumn]])), " representative terms choosing the BROADEST significant term per term-cluster per ", groupColumn)
+  }else{
+    setorder(clusterInfo, pvalueColumn)
+    winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[1],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners[[termColumn]])), " representative  terms choosing the MOST significant term per term-cluster per ", groupColumn)
+  }
+  result <- enrichResultsTable[enrichResultsTable[[termColumn]] %in% winners[[termColumn]],]
+  result[clusterInfo, cluster.id := cluster, on = termColumn]
+  list(simplified = result, clusterInfo = clusterInfo)
+}
+
+
+
+
+
 simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
                                                       cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01){
   if (length(unique(enrichResultsTable$ID)) < 2){
@@ -21,6 +130,15 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
     message ("Computing universal gene overlap between ", length(sig_go_terms), " significant GO terms")
   }
   
+  if(groupColumn == "cluster"){
+    message ("When group column = cluster, it is renamed to cluster.x to avoid clashing with column names used for GO clusters")
+    groupColumn <- "cluster.x"
+    setnames(enrichResultsTable, old= "cluster", new = "cluster.x")
+  }
+  
+  # expect gmt in term2gene first 2 column format
+  gmt.subset <- gmt[gmt[[1]] %in% sig_go_terms, 1:2]
+  setnames(gmt.subset, new = c("ont", "gene"))
   gmt.subset <- gmt[ont %in% sig_go_terms, .(ont=factor(ont), gene=factor(gene))]
   termByGeneMat <-  Matrix::sparseMatrix(as.integer(gmt.subset$ont), as.integer(gmt.subset$gene), 
                                          dimnames=list(levels(gmt.subset$ont), 
@@ -38,7 +156,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   message ("GO terms clustered into ", max(clusters$cluster), " clusters")
   
   ## go gene set lengths
-  gmt.setLengths <- gmt[,.(setSize = length(unique(gene))), by = ont]
+  gmt.setLengths <- gmt.subset[,.(setSize = length(unique(gene))), by = ont]
   clusters <- merge (clusters, gmt.setLengths, by.x="ID", by.y="ont")
   
   ## local gene set lengths  -- this will only count those genes that make it into an enriched list
@@ -160,9 +278,10 @@ library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
                                       negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
                                       annotatePossibleMatches = TRUE, top_annotation = NULL, row_names_gp = gpar(fontsize = 10),
-                                      upperThreshold  = NULL,...){
-  setorder(simplifiedEnrichTable, p.adjust)
-  bestTermPerBait <- simplifiedEnrichTable[p.adjust<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
+                                      upperThreshold  = NULL,
+                                      pvalColumn = "p.adjust", ...){
+  setorderv(simplifiedEnrichTable, cols = pvalColumn)
+  bestTermPerBait <- simplifiedEnrichTable[simplifiedEnrichTable[[pvalColumn]]<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
 
     if (is.null(fullEnrichTable)){
     fullEnrichTable <- simplifiedEnrichTable
@@ -224,7 +343,7 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 
   if (annotatePossibleMatches==TRUE){
     genesInUniverseCounts <- unique(fullEnrichTable[, .( geneCount = as.integer(gsub("[0-9]+/", "", GeneRatio))), by = c(groupColumn)])
-    if (nrow(genesInUniverseCounts) != length(unique(genesInUniverseCounts$group))){
+    if (nrow(genesInUniverseCounts) != length(unique(genesInUniverseCounts[[groupColumn]]))){
       stop("non-unique gene counts per group. If you didn't combine multiple differently grouped enrichments, this is unexpected. If it is, set annotatePossibleMatches = FALSE")
     }
     cols <- colnames(main.mat)
@@ -246,18 +365,20 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 
 
 loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", keyType = c("UNIPROT", "SYMBOL")){
-GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
-gmt <- rbindlist(lapply (GO$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
-gmt$description <- GO$PATHID2NAME[gmt$ont]
-return(gmt)
+  GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
+  gmt <- rbindlist(lapply (GO$EXTID2PATHID, function(x) data.table(ont.id = x)), idcol="gene")
+  gmt$ont <- GO$PATHID2NAME[gmt$ont.id]
+  setcolorder(gmt, c("ont", "gene", "ont.id"))
+  return(gmt)
 }
 
 
 
 loadKegg <- function (organism=c("hsa", "mmu")[1], keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
   KEGG <- clusterProfiler:::prepare_KEGG(organism, "KEGG", keyType)
-  gmt <- rbindlist(lapply (KEGG$EXTID2PATHID, function(x) data.table(ont = x)), idcol="gene")
-  gmt$description <- KEGG$PATHID2NAME[gmt$ont]
+  gmt <- rbindlist(lapply (KEGG$EXTID2PATHID, function(x) data.table(ont.id = x)), idcol="gene")
+  gmt$ont <- KEGG$PATHID2NAME[gmt$ont.id]
+  setcolorder(gmt, c("ont", "gene", "ont.id"))
   return(gmt)
   
 }
@@ -490,5 +611,76 @@ loadCORUMasGMT <- function (path = NULL, species = c("HUMAN", "MOUSE"), idType =
 
 limitGMT2PantherGOslim <- function (gmt.dt, fileOrURL = "http://data.pantherdb.org/PANTHER16.0/ontology/PANTHERGOslim.obo"){
   slimGO <- ontologyIndex::get_ontology(fileOrURL)
-  gmt.dt[ont %in% names(slimGO$name)]
+  gmt.dt[ont.id %in% names(slimGO$name)]
 }
+
+
+# fgsea #################
+
+#' Given a matrix and a column name perform fgsea on a single column
+#' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
+oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
+  print (columnName)
+  log2FC <- mat[,columnName]
+  
+  if (var(log2FC, na.rm = TRUE) == 0){
+    message ("No variance detected in ", columnName, " returning NULL to avoid a fgsea crash")
+    return (NULL)
+  }
+  
+  if (anyDuplicated(names(log2FC))){
+    message ("Duplicate row names found, keeping only the greatest (this favors positive over negative and favors those more likely to be duplicated (maybe larger proteins))")
+    log2FC <- sort (log2FC, decreasing = TRUE)
+    log2FC <- log2FC[!duplicated(names(log2FC))]
+    
+  }
+  
+  # reorder randomly so ties are less likely to influence results
+  log2FC <- sample(log2FC, length(log2FC))
+  
+  # fgsea fails with missing values
+  log2FC <- log2FC[!is.na(log2FC)]
+  
+  # fgsea fails with infinite values
+  if (any (is.infinite(log2FC))){
+    message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
+    log2FC <- log2FC[is.finite(log2FC)]
+  }
+  
+  #nperm=1000, gseaWeightParam = 1, nproc=1
+  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
+  seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
+  return (seaRes)
+}
+
+#' Given a matrix run fgsea on all columns, return table of results with column "group" identifying the column of the matrix
+#' @param mat
+#' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#' @param scoreType is chosen based on presence of negative or positive values in the matrix
+#' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
+matrixFGSEA <- function (mat, sets, ...){
+  anyPositive <- any(mat > 0, na.rm = TRUE)
+  anyNegative <- any(mat < 0, na.rm = TRUE)
+  if (anyPositive & anyNegative)
+    scoreType = "std"
+  if (anyPositive & !anyNegative)
+    scoreType = "pos"
+  if (!anyPositive & anyNegative)
+    scoreType= "neg"
+  if(!anyPositive & !anyNegative)
+    stop("No variance or no values detected in matrix")
+  
+  
+  if ("data.frame" %in% class(sets)){
+    # assume its in term2gene format and split the genes (2nd col) by term(1st)
+    sets <- split(sets[[2]], sets[[1]])
+  }
+  
+  all.sea <- lapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
+  names(all.sea) <- colnames(mat)
+  sea.dt <- rbindlist(all.sea, idcol = "group")
+  
+  return (sea.dt)
+}
+
