@@ -15,7 +15,8 @@ LoadNumPyS_matrix <- function (matrixPath, nodesTablePath){
 
 
 # geneHeats : data.table with gene and heat columns
-NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000, networkHeatOnly = FALSE, permuteOnlyInObserved=FALSE, calculateContributions = FALSE){
+NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000, networkHeatOnly = FALSE, 
+                                     permuteOnlyInObserved=FALSE, calculateContributions = FALSE, genesInContributionsTable = NULL){
   message (now(), " Checking S matrix")
   stopifnot(check_s_matrix(S_matrix))
   
@@ -69,8 +70,13 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
                          self.heat = heat.0 * diag(S_matrix))
   
   if (calculateContributions == TRUE){
-    message (now(), " Calculating per-gene contributions to final heat for genes with p.value < 0.05")
-    sigGenes <- results[pvalue < 0.05,]$gene
+    if (!is.null(genesInContributionsTable)){
+      sigGenes <-genesInContributionsTable 
+      message (now(), sprintf(" Calculating per-gene contributions to final heat for %d requested genes", length(genesInContributionsTable)))
+    }else{
+      sigGenes <- results[pvalue < 0.05,]$gene
+      message (now(), " Calculating per-gene contributions to final heat for genes with p.value < 0.05")
+    }
     toFromTable <- CalculateContributions (S_matrix, heat.0, sigGenes, networkHeatOnly)
     return(list(results = results, contributions = toFromTable))
   }else{
@@ -90,7 +96,7 @@ CalculateContributions <- function(S_matrix, startHeats, sigGenes, networkHeatOn
   fromToTable[, percent.contributed.heat := 100 * contributed.heat/sum(contributed.heat, na.rm = TRUE), by = to]
   setorder (fromToTable, -percent.contributed.heat, na.last = TRUE)
   fromToTable[, cumulative.percent.contributed.heat := cumsum(percent.contributed.heat), by = to]
-  return (fromToTable)
+  return (fromToTable[contributed.heat > 0.0]) # trim table to positive contributions only (no 0.0)
 }
 
 
