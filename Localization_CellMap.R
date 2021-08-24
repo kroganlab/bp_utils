@@ -1,7 +1,13 @@
 library (data.table)
 library (magrittr) # for %>% 
 
-
+if (!exists("matrixFGSEA")){
+  if (basename(getwd()) != "bp_utils"){
+    message ("This script makes use of matrixFGSEA now defined in bp_utils/enrichmentTestFunctions.R. Either set chdir =TRUE when sourcing this file and it will be sourced automatically, or be sure to source the other file as well.")
+  }else{
+    source ("enrichmentTestFunctions.R")
+  }
+}
 
 
 #' @param listOfSets boolean indicating to return the full data.table (FALSE, default) or a list of sets
@@ -23,58 +29,60 @@ cellMapTable2ListOfSets <- function (cellMap, identifiers = c("symbol", "UniProt
 }
 
 
-#' Given a matrix and a column name perform fgsea on a single column
-#' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
-#' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
-oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
-  print (columnName)
-  log2FC <- mat[,columnName]
-  
-  if (var(log2FC, na.rm = TRUE) == 0){
-    message ("No variance detected in ", columnName, " returning NULL to avoid a fgsea crash")
-    return (NULL)
-  }
-  
-  # reorder randomly so ties are less likely to influence results
-  log2FC <- sample(log2FC, length(log2FC))
-  
-  # fgsea fails with missing values
-  log2FC <- log2FC[!is.na(log2FC)]
-  
-  # fgsea fails with infinite values
-  if (any (is.infinite(log2FC))){
-    message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
-    log2FC <- log2FC[is.finite(log2FC)]
-  }
-  
-  #nperm=1000, gseaWeightParam = 1, nproc=1
-  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
-  seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
-  return (seaRes)
-}
 
-#' Given a matrix run fgsea on all columns, return table of results with column "group" identifying the column of the matrix
-#' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
-#' @param scoreType is chosen based on presence of negative or positive values in the matrix
-#' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
-matrixFGSEA <- function (mat, sets, ...){
-  anyPositive <- any(mat > 0, na.rm = TRUE)
-  anyNegative <- any(mat < 0, na.rm = TRUE)
-  if (anyPositive & anyNegative)
-    scoreType = "std"
-  if (anyPositive & !anyNegative)
-    scoreType = "pos"
-  if (!anyPositive & anyNegative)
-    scoreType= "neg"
-  if(!anyPositive & !anyNegative)
-    stop("No variance or no values detected in matrix")
-  
-  all.sea <- lapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
-  names(all.sea) <- colnames(mat)
-  sea.dt <- rbindlist(all.sea, idcol = "group")
-  
-  return (sea.dt)
-}
+#' #' Given a matrix and a column name perform fgsea on a single column
+#' #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#' #' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
+#' oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
+#'   print (columnName)
+#'   log2FC <- mat[,columnName]
+#'   
+#'   if (var(log2FC, na.rm = TRUE) == 0){
+#'     message ("No variance detected in ", columnName, " returning NULL to avoid a fgsea crash")
+#'     return (NULL)
+#'   }
+#'   
+#'   # reorder randomly so ties are less likely to influence results
+#'   log2FC <- sample(log2FC, length(log2FC))
+#'   
+#'   # fgsea fails with missing values
+#'   log2FC <- log2FC[!is.na(log2FC)]
+#'   
+#'   # fgsea fails with infinite values
+#'   if (any (is.infinite(log2FC))){
+#'     message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
+#'     log2FC <- log2FC[is.finite(log2FC)]
+#'   }
+#'   
+#'   #nperm=1000, gseaWeightParam = 1, nproc=1
+#'   seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
+#'   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
+#'   return (seaRes)
+#' }
+#' 
+#' #' Given a matrix run fgsea on all columns, return table of results with column "group" identifying the column of the matrix
+#' #' @param mat
+#' #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#' #' @param scoreType is chosen based on presence of negative or positive values in the matrix
+#' #' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
+#' matrixFGSEA <- function (mat, sets, ...){
+#'   anyPositive <- any(mat > 0, na.rm = TRUE)
+#'   anyNegative <- any(mat < 0, na.rm = TRUE)
+#'   if (anyPositive & anyNegative)
+#'     scoreType = "std"
+#'   if (anyPositive & !anyNegative)
+#'     scoreType = "pos"
+#'   if (!anyPositive & anyNegative)
+#'     scoreType= "neg"
+#'   if(!anyPositive & !anyNegative)
+#'     stop("No variance or no values detected in matrix")
+#'   
+#'   all.sea <- lapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
+#'   names(all.sea) <- colnames(mat)
+#'   sea.dt <- rbindlist(all.sea, idcol = "group")
+#'   
+#'   return (sea.dt)
+#' }
 
 
 #' adds a column to scores.dt that contains cellMap localization
