@@ -2,15 +2,17 @@
 
 ## This script takes an MSstats.csv file from FragPipe and converts it to be compatible with MSstats and artMS workflows.
 ## 2021-08-14
-
+# Find 5 EDIT THIS statements below for lines  you should modify.
 
 # Load libraries and source files
 library (data.table)
-source("~/github/kroganlab/bp_utils/LocatePeptidePtmInProteins.R")
+source("~/github/kroganlab/bp_utils/LocatePeptidePtmInProteins.R")# <- EDIT THIS
+
 
 # Define input files
-input_file = "Ph_FragPipe_MSstats.csv"
-fasta_file = "2021-08-12-decoys-contam-Human-canonical-20200228__RSV-AstrainA2__PIV-5strainW3__EGFP.fasta.fas"
+input_file = "Ph_FragPipe_MSstats.csv"# <- EDIT THIS
+fasta_file = "2021-08-12-decoys-contam-Human-canonical-20200228__RSV-AstrainA2__PIV-5strainW3__EGFP.fasta.fas"# <- EDIT THIS
+
 
 # Load file and make sure protein names are correct
 ph = fread(input_file)
@@ -21,8 +23,8 @@ ph$ProteinKey = paste(ph$ProteinName,ph$PeptideSequence,sep="__") # sep here sho
 mehdi_map_sites(ph,input_file,fasta_file, protein_peptide_sep = "__")
 
 # Add keys and conditions properly to file, remove any intensities with NA
-input_file = "Ph_FragPipe_MSstats_sitesmapped.csv"
-keys_file = "keys.txt"
+input_file = "Ph_FragPipe_MSstats_sitesmapped.csv" # <- EDIT THIS
+keys_file = "keys.txt" # <- EDIT THIS after you make a keys.txt file
 mehdi_fragpipe_addkeys(input_file,keys_file)
 
 # Example Keys file
