@@ -139,9 +139,9 @@ fastaFileToTable <- function(filePath){
                              as.string = TRUE, set.attributes = FALSE)
   dt <- data.table (header = names(seqs), sequence = unlist(seqs))
   # expect uniprot format 'sp|Q13245|protein name'
-  dt[grepl ("|", header), c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|", keep = 1:3)]
+  dt[grepl ("\\|", header), c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|", keep = 1:3)]
   # if no pipes then we use the whole header as the uniprot identifier
-  dt[!grepl("|", header),  uniprot := header] 
+  dt[!grepl("\\|", header),  uniprot := header] 
   return (dt[])
 }
 
@@ -200,7 +200,8 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   mapper.expanded[up.dt, peptideCopies := stringr::str_count(sequence, cleanPeptide),on = "uniprot"]
   if (any (mapper.expanded$peptideCopies == 0)){
     notMatched <- unique(mapper.expanded[peptideCopies == 0]$fragPipeProteinName)
-    message (length(notMatched), " peptides could not be located within their protein. Is this the correct FASTA?")
+    message (length(notMatched), " peptides could not be located within their protein. Is this the correct FASTA?","\n\t",
+             "This message can be misleading if you have duplicate uniprot IDs in your FASTA, such as forward and reverse.")
     print(head(notMatched))
     message ("The unmatched peptides will be removed from futher analysis")
     mapper.expanded <- mapper.expanded[peptideCopies > 0]

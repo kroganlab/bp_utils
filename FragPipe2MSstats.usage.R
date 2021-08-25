@@ -5,7 +5,8 @@
 
 
 # Load libraries and source files
-source("~/github/mehdi/proteomics/FragPipe2MSstats.R")
+library (data.table)
+source("~/github/kroganlab/bp_utils/LocatePeptidePtmInProteins.R")
 
 # Define input files
 input_file = "Ph_FragPipe_MSstats.csv"
@@ -13,11 +14,10 @@ fasta_file = "2021-08-12-decoys-contam-Human-canonical-20200228__RSV-AstrainA2__
 
 # Load file and make sure protein names are correct
 ph = fread(input_file)
-ph$ProteinName = gsub("^[^|]*|\\s*||[^|]*$", "", ph$ProteinName)
-ph$ProteinName = gsub("\\|", "", ph$ProteinName)
+ph[grepl ("\\|", ProteinName), ProteinName := tstrsplit(ProteinName, "\\|")[[2]] ] # strip off extra uniprot fields
 ph$ProteinKey = paste(ph$ProteinName,ph$PeptideSequence,sep="__") # sep here should match protein_peptide_sep below (and not used in any protein names)
 
-# Map peptides to sites within proteins
+# Map peptides to sites within proteins, writes to file at gsub(input_file, "(.csv)?$", "_sitesmapped.csv")
 map_sites(ph,input_file,fasta_file, protein_peptide_sep = "__")
 
 # Add keys and conditions properly to file, remove any intensities with NA
