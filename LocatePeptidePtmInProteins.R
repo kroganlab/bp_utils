@@ -1,6 +1,58 @@
 library (data.table)
 # requires stringr, RCurl, seqinr
 
+# next two files originally  in  FragPipe2MSstats.R see
+# https://kroganucsf.slack.com/archives/CQ50RCEF7/p1629875481043800 
+# (Slack accessible to Krogan Lab members only)
+
+#' A wrapper written by Mehdi. Modifies ph (in place) and writes out contents to an output file
+#' @param ph data.table that holds the processed contents of input_file, see FragPipe2MSstats.usage.R for processing
+#' @input_file character string denoting the path of input--will be modified with _sitsmapped.csv for output file
+#' @fasta_file character path to the fastafile holding sequences expected in ph
+#' @protein_peptide_sep character string separator between proteinID and peptideID in ProteinKey column of ph
+mehdi_map_sites = function(ph,input_file,fasta_file,protein_peptide_sep = "__"){
+  
+  ph[, ProteinSite := fragPipePTMFormat2SiteFormat(ProteinKey, fastaFile =  fasta_file, downloadFromWeb = FALSE, proteinPepSep = protein_peptide_sep)]
+  #ph[,Protein := ProteinName]
+  #ph[,ProteinName := newProteinName]
+  #ph[,newProteinName := NULL]
+  
+  # remove those that didn't map...or that are don't have PH
+  #noMissingPH <- ph[!is.na(ProteinName)]
+  
+  # Convert mass shifts to words
+  ph$PeptideSequence = convertMassModificationFormat(ph$PeptideSequence)
+  
+  fwrite(ph, paste(gsub(".csv","",input_file),"_sitesmapped.csv",sep=""))
+  
+}
+
+#' @param input_file character string
+#' @param keys_file character string 
+mehdi_fragpipe_addkeys = function(input_file, keys_file){
+
+  # Load data
+  keys = fread(keys_file)
+  ph = fread (input_file)
+  
+  # Make Run column the Condition column
+  ph$Run = ph$Condition
+  
+  # Replace the Condition column
+  ph$Condition = keys$Condition[match(ph$Run,keys$Run)]
+  
+  # Replace BioReplicate column
+  ph$BioReplicate = keys$BioReplicate[match(ph$Run,keys$Run)]
+  
+  # Remove any NA intensity values
+  ph = ph[!is.na(ph$Intensity),]
+  
+  # Save out file
+  fwrite(ph,paste(gsub('.csv','',input_file),"_wKeys.csv",sep=''),sep=',')
+  
+}
+# /end new FragPipe2MSstats.R functions
+
 
 
 convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", "MOX", "NAC"), keepOnly = NULL, removeAll = FALSE){
@@ -86,7 +138,10 @@ fastaFileToTable <- function(filePath){
   seqs <- seqinr::read.fasta(filePath, seqtype = "AA", 
                              as.string = TRUE, set.attributes = FALSE)
   dt <- data.table (header = names(seqs), sequence = unlist(seqs))
-  dt[, c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|", keep = 1:3)]
+  # expect uniprot format 'sp|Q13245|protein name'
+  dt[grepl ("|", header), c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|", keep = 1:3)]
+  # if no pipes then we use the whole header as the uniprot identifier
+  dt[!grepl("|", header),  uniprot := header] 
   return (dt[])
 }
 
@@ -99,10 +154,10 @@ fastaFileToTable <- function(filePath){
 #' @param fastaFile path to the fasta file, uniprot format, that should match the first field in protein names
 #' @param downloadFromWeb logical TRUE = attempt to download uniprots not found in fasta file from web.
 
-fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile = NULL, downloadFromWeb = TRUE){
+fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile = NULL, downloadFromWeb = TRUE, proteinPepSep = "_"){
   mapper <- data.table(fragPipeProteinName = unique(proteinNames))
   
-  mapper[, c("uniprot", "modPeptide") := tstrsplit(fragPipeProteinName, "_")]
+  mapper[, c("uniprot", "modPeptide") := tstrsplit(fragPipeProteinName, proteinPepSep)]
   
   mapper[, modPeptideLC.PTM := convertMassModificationFormat(modPeptide, keepOnly = ptmType)]
   
