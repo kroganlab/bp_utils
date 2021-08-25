@@ -1,7 +1,8 @@
 
 
 ## This script takes an MSstats.csv file from FragPipe and converts it to be compatible with MSstats and artMS workflows.
-## 2021-08-14
+## Author: Mehdi B. 2021-08-14
+
 # Find 5 EDIT THIS statements below for lines  you should modify.
 
 # Load libraries and source files
