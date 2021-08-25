@@ -17,13 +17,13 @@ ph = fread(input_file)
 ph[grepl ("\\|", ProteinName), ProteinName := tstrsplit(ProteinName, "\\|")[[2]] ] # strip off extra uniprot fields
 ph$ProteinKey = paste(ph$ProteinName,ph$PeptideSequence,sep="__") # sep here should match protein_peptide_sep below (and not used in any protein names)
 
-# Map peptides to sites within proteins, writes to file at gsub(input_file, "(.csv)?$", "_sitesmapped.csv")
-map_sites(ph,input_file,fasta_file, protein_peptide_sep = "__")
+# Map peptides to sites within proteins, writes to file at gsub( "(.csv)?$", "_sitesmapped.csv",input_file)
+mehdi_map_sites(ph,input_file,fasta_file, protein_peptide_sep = "__")
 
 # Add keys and conditions properly to file, remove any intensities with NA
 input_file = "Ph_FragPipe_MSstats_sitesmapped.csv"
 keys_file = "keys.txt"
-fragpipe_addkeys(input_file,keys_file)
+mehdi_fragpipe_addkeys(input_file,keys_file)
 
 # Example Keys file
 # SampleNumber	Run	Condition	BioReplicate
