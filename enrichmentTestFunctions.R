@@ -15,7 +15,7 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
     stop ("A term2gene.gmt is required. 1st column term, 2nd column gene IDs (or uniprots etc)")
   }
   if (is.null(universe)){
-    warn("No universe chosen. Using the full set of genes in term2gene.gmt.  This is likely inappropriate")
+    warning("No universe chosen. Using the full set of genes in term2gene.gmt.  This is likely inappropriate")
     universe <- unique(term2gene.gmt[,2])
   }
   
@@ -119,7 +119,8 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   setDT(enrichResultsTable); setDT(gmt)
   
   ##Select Significant Terms
-  target_overrep_sig <- enrichResultsTable[p.adjust < max(max_pAdjust,0.05),]#qvalue < 0.01]
+  #target_overrep_sig <- enrichResultsTable[p.adjust < max(max_pAdjust,0.05),]#qvalue < 0.01]
+  target_overrep_sig <- enrichResultsTable[p.adjust < max_pAdjust,]#qvalue < 0.01]
   
   ##Prepare Significant GO Term Jaccard Similarity Matrix
   sig_go_terms <- unique(target_overrep_sig$ID)
@@ -148,7 +149,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   # maybe this is faster?  I haven't clocked it
   go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
   
-  hc <- hclust(go_dist_mat)
+  hc <- hclust(go_dist_mat, method = "ward.D2")
   
   clusters <- cutree(hc, h=cutHeight)
   clusters <- data.table (cluster = as.numeric(clusters), ID = attributes(clusters)$names )
@@ -179,7 +180,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   }
   result <- enrichResultsTable[ID %in% winners$ID,]
   result[clusterInfo, cluster.id := cluster, on = "ID"]
-  list(simplified = result, clusterInfo = clusterInfo)
+  list(simplified = result, clusterInfo = clusterInfo, tree = hc)
 }
 
 
@@ -226,9 +227,15 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              top_annotation = NULL,
                              row_names_gp = gpar(fontsize(10)),
                              column_names_gp = gpar(fontsize = 10),
+                             upperThreshold = NULL,
                              ...){
+  # by default we pass a long vector of colors and let ComplexHeatmap define the ranges
   Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
   colors <- Blues(100)
+  
+  # if we get an upperTreshold, we define the limits in the colors object
+  if(!is.null(upperThreshold))
+    colors <- circlize::colorRamp2(breaks =seq(0, upperThreshold, length.out = 100), colors = colors)
   
   heatmap_legend_param = list(legend_direction="horizontal", title = "global enrich\n-log10(adj.p)")
   
@@ -245,7 +252,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                 column_title = title,
                                 column_names_rot = 90, row_names_gp = row_names_gp, column_names_gp = column_names_gp,
                                 show_row_dend = show_row_dend, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
-                                row_names_max_width = max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
+                                row_names_max_width = 2*max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
                                 top_annotation = top_annotation,
                                 cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.null(borderMatrix) & !is.null(borderColFun)){
@@ -357,7 +364,8 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     #}
   }
   
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, row_names_gp = row_names_gp, ...)
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, row_names_gp = row_names_gp,
+                         upperThreshold = upperThreshold,...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }

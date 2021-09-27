@@ -11,11 +11,11 @@
 #' @param splitColumn  character indicating name of column in fullDataTable that defines the units to compute
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
 
-linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein"){
+linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL){
   subsetTables <- split (fullDataTable, fullDataTable[[splitColumn]])
   
   # do al linear models, anova, etc. Result is a list of [[anova, coef]] lists
-  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList)})
+  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList)}, cl = cl)
 
   # get all anova in a  single table
   anovas.list <- lapply(coef.anova.list, `[[`, "anova")

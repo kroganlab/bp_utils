@@ -128,3 +128,33 @@ makeContrast.regEx <- function(mssQ, regEx){
   }
   return (contrastMat)  
 }
+
+
+
+
+#' This function takes the output of MSstats::dataProcess with SUBJECTS like GroupA.1 and GroupB.1 and converts
+#' both to match batch.1.  This will tell MSstats to do a "paired" analysis, aka include a SUBJECT term in the model.
+#' This will only work if the second field when splitting by "." denotes a meaningful batch identifier. 
+#' @param dp.out The output list of MSstats::dataProcess
+#' @param data.frame.only logical ,if TRUE will make return values data.frames (instead of data.tables)
+
+batchifyMSQuant <- function(dp.out, data.frame.only = NULL){
+  if(is.null(data.frame.only))
+    data.frame.only <- !"data.table" %in% class(dp.out$RunlevelData)
+  
+  setDT(dp.out$ProcessedData)
+  dp.out$ProcessedData[, SUBJECT_ORIGINAL := paste("batch", tstrsplit(SUBJECT_ORIGINAL, split = "\\.")[[2]], sep = ".")]
+  dp.out$ProcessedData[, SUBJECT := as.integer(as.factor(SUBJECT_ORIGINAL))]
+  dp.out$ProcessedData[, SUBJECT_NESTED := sprintf("%d.%d", GROUP,SUBJECT)]
+  if (data.frame.only)
+    setDF(dp.out$ProcessedData)
+  
+  setDT(dp.out$RunlevelData)
+  dp.out$RunlevelData[, SUBJECT_ORIGINAL := paste("batch", tstrsplit(SUBJECT_ORIGINAL, split = "\\.")[[2]], sep = ".")]
+  dp.out$RunlevelData[, SUBJECT := as.integer(as.factor(SUBJECT_ORIGINAL))]
+  dp.out$RunlevelData[, SUBJECT_NESTED := sprintf("%d.%d", GROUP,SUBJECT)]
+  if (data.frame.only)
+    setDF(dp.out$RunlevelData)
+  
+  return (dp.out)
+}
