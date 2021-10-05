@@ -1,16 +1,75 @@
 
 # saintDocker
 
-Run SAINTexpress PPI scorer on any machine with docker.  (This has only been tested on a few Apple notebook computers.). This directory contains the files necessary to create the docker image, and a shell script to help you run saintExpress from the image. Because the docker image is already created and shared on DockerHub, you can get by with just the shell script, or none of the files if you want to manage `docker run` yourself on the command line. 
+Run SAINTexpress PPI scorer on any machine with docker.  (This has only been tested on a few Apple notebook computers.). This directory contains the files necessary to create the docker image, and a shell script to help you run saintExpress from the image. 
+
+To run Docker you will first build the image locally, then use the saintDocker.sh script to help run SAINT within the docker iamge.
+
 
 ## Usage:
 
+### build the docker iamge
 ```
-#best is to start in a directory that contains your bait,prey,interactions file output from artMS...
+# build the docker image within the  saintDocker directory that you downloaded from github
+cd saintDocker
+docker build -t bpolacco/saint . 
+# this will run for a few minutes
+```
 
+### verify the build (optional)
+If it worked you should see the new image in your list of docker images from the command `docker images`:
+```
+$ docker images
+REPOSITORY                                TAG       IMAGE ID       CREATED          SIZE
+bpolacco/saint                            latest    a012accb19cb   10 minutes ago   1.2GB
+...
+```
+
+To  further test if it worked you can open a BASH shell within a disposable container and verify the tools are available.  The following ouput is from running these commands (but once in the shell feel free to look around with any BASH/linux commands):
+
+```
+docker run -it --rm -v`pwd`:/wd -w /wd bpolacco/saint  /bin/bash
+SAINTexpress-spc
+SAINTexpress-int
+exit
+```
+
+
+
+```
+$ docker run -it --rm -v`pwd`:/wd -w /wd bpolacco/saint  /bin/bash
+root@6c8077997957:/wd# SAINTexpress-spc
+Input files not supplied, using defaults.
+Input files are: inter.dat, prey.dat, bait.dat
+Interaction file: "inter.dat"
+Prey file: "prey.dat"
+Bait file: "bait.dat"
+GO file: ""
+Parsing prey file prey.dat ...terminate called after throwing an instance of 'std::runtime_error'
+  what():  invalid delimiter
+Aborted
+root@6c8077997957:/wd# SAINTexpress-int
+Input files not supplied, using defaults.
+Input files are: inter.dat, prey.dat, bait.dat
+Interaction file: "inter.dat"
+Prey file: "prey.dat"
+Bait file: "bait.dat"
+GO file: ""
+Parsing prey file prey.dat ...terminate called after throwing an instance of 'std::runtime_error'
+  what():  invalid delimiter
+Aborted
+root@6c8077997957:/wd# exit
+exit
+$
+```
+
+
+### run SAINTexpress using shell script
+Best is to start in a directory that contains your bait,prey,interactions file output from artMS, and then use full path to the shell script in the saintDocker folder.
+
+```
 cd msint
 ../../../saintDocker/saintDocker.sh int  my_interactions.txt my_preys.txt my_baits.txt
 ```
-If docker is installed and this is the first time you've run this, it may take a minute to download the docker image.
 
 Output is lists.txt in current directory

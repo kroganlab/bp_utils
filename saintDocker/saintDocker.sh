@@ -52,7 +52,7 @@ if [ "$#" -eq 4 ]; then
         exit 1
         ;;
  esac
- docker run --rm -v`pwd`:/wd -w /wd bpolacco/saint:0.1 $saintCommand $2 $3 $4
+ docker run --rm -v`pwd`:/wd -w /wd bpolacco/saint $saintCommand $2 $3 $4
 else
  usage
  exit 1
