@@ -158,3 +158,27 @@ batchifyMSQuant <- function(dp.out, data.frame.only = NULL){
   
   return (dp.out)
 }
+
+
+
+
+
+specFileToCompleteMSstats <- function(specFile){
+  #can't have duploicate entries per peptide ion/run
+  stopifnot (all(specFile[,.N, by  = .(ProteinName, PeptideSequence, PrecursorCharge, Run)]$N == 1))
+  # define the two things to do a full cross join on, add dummy column to allow the full cross join
+  full.peptide.ions <- unique (specFile[, .(ProteinName, 
+                                            PeptideSequence,
+                                            PrecursorCharge,
+                                            dummyIndex = 1)])
+  full.runs <- unique(specFile[,.(Condition, Run, BioReplicate,dummyIndex = 1)])
+  
+  # do the full cross join
+  full.peptide.ions.runs <- merge (full.peptide.ions, full.runs, by = "dummyIndex",allow.cartesian=TRUE)[,dummyIndex := NULL][]
+  message (nrow(full.peptide.ions), " peptide ions in at least one of ", nrow(full.runs), " runs")
+  # merge back to the actual intensity data
+  specFile.complete <- merge (full.peptide.ions.runs, specFile, all.x=TRUE, 
+                              by = intersect(colnames(full.peptide.ions.runs),
+                                             colnames(specFile)))
+  return (specFile.complete)
+}

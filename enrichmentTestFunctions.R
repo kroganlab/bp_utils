@@ -657,7 +657,7 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   }
   
   #nperm=1000, gseaWeightParam = 1, nproc=1
-  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC, gseaParam=1, scoreType = scoreType, ...)
+  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC,  scoreType = scoreType, ...)
   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
   return (seaRes)
 }
