@@ -30,8 +30,8 @@ usage ()
 {
 
  echo "usage: ./saintDocker.sh int|spc interactions.txt preys.txt baits.txt"
- echo "   all paths must be descendents of current directory"
- echo '   i.e. `pwd`/$2 must be a valid path name'
+ echo "   all three *.txt paths  must be descendents of current directory"
+ echo '   i.e. `pwd`/$2 must be a valid path name with no use of parent directories (../)'
  echo "output: list.txt in current directory"
 
 }
