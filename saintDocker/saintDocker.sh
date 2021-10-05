@@ -2,8 +2,11 @@
 
 # A shell script to run SAINTexpress from within a docker image. Docker is
 # required to run this script successfully.  The Docker image bpolacco/saint
-# is hosted on docker hub, so docker will need to download the image on first
-# running of this file. 
+# must be built locally before this will work:
+# 
+# cd saintDocker
+# docker build -t bpolacco/saint . 
+#
 #
 # Use this to run SAINT-express on either intensity or spectral count data.
 #
@@ -19,7 +22,7 @@
 # baits file included replicates (column 1) that were not in the interactions file.
 # You may need to enter the container with a shell and troubleshoot there:
 # 
-# docker run --rm -v`pwd`:/wd -w /wd -it  bpolacco/saint:0.1 /bin/bash
+# docker run --rm -v`pwd`:/wd -w /wd -it  bpolacco/saint /bin/bash
 
 # another source of errors:  only 1 control run with SAINTExpress-int will
 # fail by throwing a const char*
