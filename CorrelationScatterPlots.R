@@ -23,22 +23,29 @@ BuildPairsTable <- function (dt){
                     dt[, .(yGroup = unique(runID), dummy = 1)],
                     allow.cartesian = TRUE)[
                       xGroup < yGroup
-                    ][, dummy := NULL][]
+                    ][]
+  #expand for all observed features:
+  allFeatures <- unique(dt$featureID)
+  allByAllFeatures <- merge (allByAll,
+                             data.table (dummy = 1, featureID = allFeatures),
+                             by = c("dummy"),
+                             allow.cartesian = TRUE)
+  
+  
   # fill out the exes column
-  exes <- merge (allByAll,
+  exes <- merge (allByAllFeatures,
                  dt[, .(xGroup = runID, featureID, log2Int.x = log2Intensity)],
-                 allow.cartesian = TRUE,
-                 bt = "xGroup",
-                 all.y = TRUE)
+                 by = c("xGroup", "featureID"),
+                 all.x = TRUE)
   
   #fill out they whys column
   exesAndWhys <- merge (exes,
                         dt[, .(yGroup = runID, featureID, log2Int.y = log2Intensity)],
                         allow.cartesian = TRUE,
                         by = c("yGroup", "featureID"),
-                        all = TRUE)[! (is.na(yGroup) | is.na(xGroup))]
+                        all.x = TRUE)
   
-  return (exesAndWhys)
+  return (exesAndWhys[, dummy := NULL][])
 }
 
 
@@ -71,6 +78,7 @@ PairsPlot <- function(pairsTable, missingXColor = "red", missingYColor = "orange
   
   return (p)
 }
+
 
 simplifyEvidence <- function(ev.dt){
   a <- ev.dt[, .(featureID = paste(`Leading razor protein`, `Modified sequence`, Charge, sep = "_"),
