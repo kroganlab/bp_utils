@@ -1,0 +1,206 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+library (data.table)
+library (ggplot2)
+```
+
+
+
+# Load data from MSstats
+I will use log2FC (magnitude) and pvalue (significance) combined to generate a heat (magSigScore).  
+
+```{r}
+
+results.txt <- "../data/short_ph_results.csv.gz"
+results <- fread (results.txt)
+
+
+magSigScore <- function(log2FC, pvalue, magnitudeScale = 2){
+  magnitude <- magnitudeScale * abs(log2FC)
+  significance <- -log10(pvalue)
+  significance <- ifelse (significance > magnitude, magnitude, significance)
+  sqrt(magnitude * significance)
+}
+
+
+results[, magSig := magSigScore(log2FC, pvalue)]
+# remove outliers and infinites
+results <- results[abs(log2FC) < 10,]
+
+```
+
+
+# deal with phospho data
+Above data source is phospho data, so multiple values exist per protein (multiple sites per protein).  Network propagation needs only 1 score per protein.
+This hack removes the site info per protein, discards the multiproteins, and then takes the max score per protein
+
+```{r}
+
+results[, uniprot := gsub("_[STY][0-9]+", "", Protein) %>% 
+          strsplit (";") %>% 
+          lapply (unique) %>% 
+          lapply (paste, collapse = ";") %>%
+          unlist]
+
+
+results <- results[!grepl(";", uniprot)]
+
+proteinHeatPerLabel <- results[!is.na(magSig), .(heat = max(magSig, na.rm = TRUE)), by = .(Label, uniprot)]
+
+source ("../../bp_utils/UniprotIDMapping.R")
+# I use genes here as my identifiers.  Not necessarily best...
+proteinHeatPerLabel[, gene := translateUniprot2GeneName.datFile(uniprot)]
+
+```
+
+# Load omnipath network and build network-specific S_matrix 
+```{R}
+interactions <- OmnipathR::import_omnipath_interactions()
+
+setDT(interactions)
+
+
+```
+
+## use igraph to get largest connected component.
+```{r}
+# If I was using uniprots, I'd select `source` and `target` instead of source_genesymbol etc
+# these will end up as row/column names on the S_matrix
+edges <- interactions[, .(source_genesymbol, target_genesymbol)]
+
+net.graph <- igraph::graph_from_edgelist(as.matrix(edges ), directed= FALSE)
+components <- igraph::decompose(net.graph)
+componentSizes <- sapply (components, FUN = function(x)length(igraph::V(x)))
+barplot(componentSizes)
+net.graph <- components[[which.max(componentSizes)]]
+length(igraph::V(net.graph))
+length(igraph::E(net.graph))
+
+```
+
+## output to prepare for python
+
+```{r}
+fwrite (setDT(igraph::as_data_frame(net.graph))[, .(from ,to)], "OmniPath_Interactions_maxComponent.csv")
+
+```
+
+## python code to calculate S matrix
+This is much faster in python, and you only need to do it once per network (don't need to repeat when your MS data changes)
+This calculates a different S matrix fo different values of `pr` (the restart probability).  See the for loop at line 145 to change these
+
+```{python3, eval = FALSE}
+import networkx as nx
+import numpy as np
+import pandas as pd
+import time
+
+# For math guidance/explanation
+# see https://doi.org/10.1038/nrg.2017.38
+#  Network propagation: a universal amplifier of genetic associations
+# AU  - Cowen, Lenore
+# AU  - Ideker, Trey
+# AU  - Raphael, Benjamin J.
+# AU  - Sharan, Roded
+# PY  - 2017
+# DA  - 2017/09/01
+# TI  - Network propagation: a universal amplifier of genetic associations
+# JO  - Nature Reviews Genetics
+# 
+# This uses an S matrix (terminology from above paper) which is a scaled transpose of 'inv_denom' used elsewhere in Krogan lab (see Mehdi's code)
+# to propagate with an S matrix do: S %*% heat_0
+# to propagate with inverse_denom do: heat_0 %*% inv_denom * pr
+# Note:
+# ! Order around %*% matters and S includes the pr factor !
+# col sums of S = 1
+# row sums of inv_denom = 1/pr 
+
+
+edges = pd.read_csv ("OmniPath_Interactions_maxComponent.csv", sep = ",")
+filteredEdges = edges[['from','to']]#mouseEdges[mouseEdges['combined_score'] > 600][['protein1','protein2']]
+edge_list = filteredEdges.values.tolist()
+
+# Create Graph
+G = nx.Graph(edge_list)
+G.remove_edges_from(nx.selfloop_edges(G)) # removing selfloops
+largest_cc = max(nx.connected_components(G), key=len) # only taking the largest connected component
+Gc = G.subgraph(largest_cc)
+
+# Calculate matrix inputs
+nodes = Gc.nodes()
+A = nx.adjacency_matrix(Gc, nodelist=nodes)
+D = np.array([x[1] for x in nx.degree(Gc)]) # degree of each node
+
+# integrity check: node order matches
+degreeNodes = np.array([x[0] for x in nx.degree(Gc)])
+assert (all(degreeNodes == nodes))
+
+Dinverse = np.diag(1/D)
+W = np.matmul(A.todense(), Dinverse)
+I = np.identity(W.shape[0])
+
+for pr in (0.2, 0.3, 0.5):
+  print ("starting matrix inverse calculation at {}".format(time.asctime(time.localtime())))
+  S_matrix = pr * np.linalg.inv(I-(1-pr)*W)
+  print ("finished matrix inverse calculation at {}".format(time.asctime(time.localtime())))
+  np.save("S_matrix.omnipathInteractions.pr%0.2f.npy"%(pr), S_matrix)
+  # node names
+  nodes_network = pd.DataFrame(nodes) # Getting node names(gene names)
+  nodes_network.rename(columns={0: "gene_name"}, inplace=True) # rename column header
+  nodes_network.to_csv("S_matrix.omnipathInteractions.pr%0.2f.nodeNames.csv" %(pr), index=False)
+  
+  
+```
+
+
+
+# network prop
+
+```{r}
+source ("../../bp_utils/NetworkPropagation.R")
+```
+
+
+## Load S Matrix
+```{r, fig.width = 10, fig.height = 8}
+library (RcppCNPy)
+S_matrix <- LoadNumPyS_matrix("S_matrix.omnipathInteractions.pr0.20.npy", 
+                              "S_matrix.omnipathInteractions.pr0.20.nodeNames.csv") 
+
+# take a gander at a portion of hte S_matrix
+#ComplexHeatmap::Heatmap(log10(S_matrix[1:1000, 1:1000]), show_row_names = FALSE, show_column_names = FALSE) %>% BackupAsPDF()
+```
+
+
+## network propagation on each "Label" independently
+```{r}
+# NetworkPropagateS_matrix requries a gene and heat column in the data.table passed as second argument
+# if you are using uniprots instead of gene symbols, just rename the column to 'gene' 
+
+
+groups <- unique(proteinHeatPerLabel$Label)
+names(groups) <- groups
+allNP <- pbapply::pblapply (groups, function(g) NetworkPropagateS_matrix(S_matrix,
+                                                                         proteinHeatPerLabel[Label == g], # requires gene and heat columns
+                                                                         networkHeatOnly = TRUE,
+                                                                         permuteOnlyInObserved=TRUE,
+                                                                         numPermutations = 20000))
+```
+
+## data table from list output
+
+```{r}
+
+allNPdt <- rbindlist(allNP, idcol = "Label")
+fwrite (allNPdt,  "AllNetworkPropagation_OmniPath_Interactions.rs0.2.csv")
+
+
+p <- ggplot (allNPdt, aes(x = pvalue)) + geom_histogram(boundary = 0.0, binwidth = 0.005) + facet_wrap(~Label)
+p
+
+```
+
+
