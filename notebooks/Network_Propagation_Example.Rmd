@@ -14,7 +14,7 @@ I will use log2FC (magnitude) and pvalue (significance) combined to generate a h
 
 ```{r}
 
-results.txt <- "../data/short_ph_results.csv.gz"
+results.txt <- "../../bp_utils/data/short_ph_results.csv.gz"
 results <- fread (results.txt)
 
 
@@ -52,13 +52,13 @@ proteinHeatPerLabel <- results[!is.na(magSig), .(heat = max(magSig, na.rm = TRUE
 
 source ("../../bp_utils/UniprotIDMapping.R")
 # I use genes here as my identifiers.  Not necessarily best...
-proteinHeatPerLabel[, gene := translateUniprot2GeneName.datFile(uniprot)]
+proteinHeatPerLabel[, gene := translateUniprot2GeneName(uniprot, species = "HUMAN")] # or "MOUSE" or "RAT"
 
 ```
 
 # Load omnipath network and build network-specific S_matrix 
 ```{R}
-interactions <- OmnipathR::import_omnipath_interactions()
+interactions <- OmnipathR::import_omnipath_interactions(organism = 9606) #9606 human, 10090 mouse; 10116 rat
 
 setDT(interactions)
 
@@ -91,6 +91,7 @@ fwrite (setDT(igraph::as_data_frame(net.graph))[, .(from ,to)], "OmniPath_Intera
 ## python code to calculate S matrix
 This is much faster in python, and you only need to do it once per network (don't need to repeat when your MS data changes)
 This calculates a different S matrix fo different values of `pr` (the restart probability).  See the for loop at line 145 to change these
+possible values of pr.
 
 ```{python3, eval = FALSE}
 import networkx as nx
