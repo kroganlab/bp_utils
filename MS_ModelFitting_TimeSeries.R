@@ -1,17 +1,15 @@
+#' formula like yColumn~poly(polyColumn)+otherTerms
+#' yColumn, polyColumn, otherTerms column names to populate the formula as above
+#'
+#' data : data.table with the columns
+#' start.times : which values of polyColumn to use for report deltas Yt - Y0
+#' powerRange : actually a set; so 1:5 and not c(1,5). Which powers in poly(x,power) to use in the model
+#' maxSelectedPower, minSelectedPower which values in powerRange are allowable as best_power
+#' 
+#' Not currently used:
+#' pValueOverall the p value that the F test (model+polyColumn vs model) passes
+#' pValueIncrement in determining which power to select, p.F.Test (poly(polyColumn, power = i), poly (polyColumn, power = i-1) must be less than this
 
-
-
-# formula like yColumn~poly(polyColumn)+otherTerms
-# yColumn, polyColumn, otherTerms column names to populate the formula as above
-#
-# data : data.table with the columns
-# start.times : which values of polyColumn to use for report deltas Yt - Y0
-# powerRange : actually a set; so 1:5 and not c(1,5). Which powers in poly(x,power) to use in the model
-# maxSelectedPower, minSelectedPower which values in powerRange are allowable as best_power
-
-# Not currently used:
-# pValueOverall the p value that the F test (model+polyColumn vs model) passes
-# pValueIncrement in determining which power to select, p.F.Test (poly(polyColumn, power = i), poly (polyColumn, power = i-1) must be less than this
 
 
 fitPoly.MultiplePowers <- function(data,
@@ -56,38 +54,7 @@ fitPoly.MultiplePowers <- function(data,
     #print(formString)
     as.formula(formString)
   }
-  # delta versus one or more start times using fitted model estimated marginal means
-  deltas.perTime.emm <- function(dt,lmout, start.times = c(0,1), polyColumn = "rank.time"){
-    if(grepl("delta", polyColumn)) stop("delta is not allowed in polyColumn name")
-    
-    if (length(intersect(start.times, dt[[polyColumn]])) == 0) start.times <- min(dt[[polyColumn]])
-    
-    # build table of all by all rank.times and subjects that are in the data 
-    rank.times <- unique(dt[[polyColumn]])
-    subjects <- unique(dt$SUBJECT_ORIGINAL)
-    newData <- data.table::setnames(data.table::data.table(rank.times), polyColumn)[]
-    newData <- newData[, .(SUBJECT_ORIGINAL = subjects), by = c(polyColumn)]
-    
-    # calculate expected values
-    newData[,prediction := predict (lmout, newData)]
-    # collate actual with imputed for the missing
-    newData <- merge(newData, data[, c(polyColumn, otherTerms,  yColumn ), with = FALSE], by = c(polyColumn, otherTerms), all.x=TRUE)
-    newData[, actual := newData[[yColumn]] ]
-    newData[is.na(actual), actual := prediction]
-    
-    # and means across subjects
-    timeMeans <- newData[,.(meanPrediction = mean(prediction), meanActual = mean(actual)), by = c(polyColumn)]
-    #then deltas
-    timeMeans[,paste0("delta.", start.times) := lapply (start.times,
-                                                        function(t){
-                                                          ifelse(t <= timeMeans[[polyColumn]] ,meanPrediction, NA) - # only compare backwards in time
-                                                            timeMeans[timeMeans[[polyColumn]] == t,meanPrediction]
-                                                        }
-    )]
-    
-    return (timeMeans)
-  }
-  
+
   
   max.timeDelta <- function(timeDeltas, polyColumn = "rank.time", absolute = TRUE){
     if(grepl("delta", polyColumn)) stop("delta is not allowed in polyColumn name")
@@ -109,6 +76,39 @@ fitPoly.MultiplePowers <- function(data,
     return (list(bestTime = bestTime, bestComparison = bestComparison, bestDelta = bestDelta) )
     
   }
+
+  # delta versus one or more start times using fitted model estimated marginal means
+  deltas.perTime.emm <- function(dt,lmout, start.times = c(0,1), polyColumn = "rank.time"){
+    if(grepl("delta", polyColumn)) stop("delta is not allowed in polyColumn name")
+    
+    if (length(intersect(start.times, dt[[polyColumn]])) == 0) start.times <- min(dt[[polyColumn]])
+    
+    # build table of all by all rank.times and subjects that are in the data 
+    rank.times <- unique(dt[[polyColumn]])
+    subjects <- unique(lmout$model$SUBJECT_ORIGINAL)#unique(dt$SUBJECT_ORIGINAL)
+    newData <- data.table::setnames(data.table::data.table(rank.times), polyColumn)[]
+    newData <- newData[, .(SUBJECT_ORIGINAL = subjects), by = c(polyColumn)]
+    
+    # calculate expected values
+    newData[,prediction := predict (lmout, newData)]
+    # collate actual with imputed for the missing
+    newData <- merge(newData, data[, c(polyColumn, otherTerms,  yColumn ), with = FALSE], by = c(polyColumn, otherTerms), all.x=TRUE)
+    newData[, actual := newData[[yColumn]] ]
+    newData[is.na(actual), actual := prediction]
+    
+    # and means across subjects
+    timeMeans <- newData[,.(meanPrediction = mean(prediction), meanActual = mean(actual)), by = c(polyColumn)]
+    #then deltas
+    timeMeans[,paste0("delta.", start.times) := lapply (start.times,
+                                                        function(t){
+                                                          ifelse(t <= timeMeans[[polyColumn]] ,meanActual, NA) - # only compare backwards in time
+                                                            timeMeans[timeMeans[[polyColumn]] == t,meanActual]
+                                                        }
+    )]
+    
+    return (timeMeans)
+  }
+  
   
   # get the summary f statistic for the whole model.
   # this includes effects of SUBJECT_ORIGINAL + 
@@ -225,9 +225,8 @@ fitPoly.MultiplePowers <- function(data,
 #' @return A nice data.table
 #' @example nice.out <- nicePolyFitOutput (combined, preColumns = c("rank", "receptor", "passFilter"), postColumns = "original.log2FC")  
 
-nicePolyFitOutput <- function(polyFits, preColumns = c(), postColumns = c()){
+nicePolyFitOutput <- function(polyFits, preColumns = c(), postColumns = c(), predictionColumns = sort (grep("prediction", colnames(polyFits), value = TRUE))){
   actualColumns <- sort (grep("actualWImputed", colnames(polyFits), value = TRUE))
-  predictionColumns <- sort (grep("prediction", colnames(polyFits), value = TRUE))
   columns <- c(preColumns,
                c("Protein", polynomialPower = "bestPower", pvalue = "best.pF.polyColumn", log2FC = "bestDelta", timeIdxOfBestDelta = "bestTime"),
                postColumns,
@@ -243,9 +242,75 @@ nicePolyFitOutput <- function(polyFits, preColumns = c(), postColumns = c()){
 }
 
 
+actualMatrixFromPolyFits <- function(polyFits, rowID = "Protein", vsFirstTime = TRUE){
+  
+  firstNotNA <- function(x)x[!is.na(x)][1]
+  
+  mat <- as.matrix(polyFits[, .SD, .SDcols = c(rowID, sort (grep("actualWImputed", colnames(polyFits), value = TRUE)))],
+                   rownames= rowID)
+  
+  if(vsFirstTime == TRUE){
+    firstValues <- apply (mat, 1, firstNotNA)
+    mat <- sweep (mat, 1,firstValues, "-")
+  }
+  return(mat)
+}
 
 
 
+#' take a matrix of non-log-transformed values (actual) and perform a time series fit on each 'receptor'
+#' optionally detrend the matrix using a matrix of predicted values. set predicted to 1 for no detrending
+#' columnInfo is a data table that translates the column names `column` to `receptor`, `time` and `rep`
+#' If no columnInfo is passed, column names are assumed to be in format: receptor_time_rep, or HT2A_05_1
+#'    dots are also treated as separated, so HT2A_05.1 is valid
+#' rep will be treated as batches to include in the model
+
+detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
+  if (is.null(columnInfo)){
+    columnInfo <- data.table(column = colnames(actual))[!grepl(spatialReferencePattern, column)]
+    columnInfo[, c("receptor", "time", "rep") := tstrsplit (column, split = "[_.]", keep = c(1,2,3))]
+    columnInfo[, SUBJECT_ORIGINAL := factor(sprintf("batch.%s", rep))]
+    
+  }
+  # check for duplicates
+  duplicatedNames <- rownames(actual) [duplicated(rownames(actual))]
+  if (length(duplicatedNames) > 0){
+    message ("matrices contain duplicate entries. These will be removed: ", duplicatedNames)
+    actual <- actual[! (rownames(actual) %in% duplicatedNames),]
+  }
+  # allow predicted to be 1, then we do no detrending, otherwise make sure rows and columns match
+  if (!(length(predicted) == 1 & predicted[1]==1)){
+    stopifnot (ncol(actual) == ncol(predicted)) # column names allowed to differ.
+    predicted <- predicted[rownames(actual),]
+  }
+  detrended <- log2(actual/predicted)
+  
+  long <- melt (as.data.table(detrended, keep.rownames = TRUE), id.vars = "rn") 
+  setnames(long, c("gene", "column", "detrendLog2Int"))
+  long <- merge (long, columnInfo, by = "column")
+  long[,orderedTime := as.integer(as.factor(time))]
+  
+  # do the fitting, per receptor
+  groups <- unique(long$receptor)
+  allFits <- list()
+  
+  numCores <- parallel::detectCores() - 1
+  cl <- parallel::makeCluster(numCores)
+  for(g in groups){
+    print (g)
+    subTables <- split (long[ receptor == g], by = "gene")
+    #geneFits <- lapply (subTables, fitPoly.MultiplePowers)
+    geneFits <- parLapply (cl, subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT_ORIGINAL"), yColumn = "detrendLog2Int")
+    #geneFits <- lapply (        subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT_ORIGINAL"), yColumn = "detrendLog2Int")
+    fitScores <- rbindlist(geneFits, idcol = "Protein", fill = TRUE)
+    allFits[[g]] <- fitScores
+  }
+  parallel::stopCluster(cl)
+  
+  allFitsDT <- rbindlist(allFits, idcol = "receptor", use.names=TRUE, fill = TRUE)
+  allFitsDT[,adj.f.pvalue := p.adjust(best.pF.polyColumn, method = "BH"), by = "receptor"]
+  return (allFitsDT)
+}
 
 
 
