@@ -9,7 +9,8 @@ library (data.table)
 #' @param numProcessors integer. Values > 1 enable multiprocessing
 
 enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("group"),
-                           term2gene.gmt = NULL, universe = NULL, numProcessors = 1){
+                           term2gene.gmt = NULL, universe = NULL, numProcessors = 1,
+                           ...){
   
   if (is.null(term2gene.gmt)){
     stop ("A term2gene.gmt is required. 1st column term, 2nd column gene IDs (or uniprots etc)")
@@ -29,7 +30,8 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
                                                          universe=universe,
                                                          TERM2GENE =  term2gene.gmt,
                                                          qvalueCutoff = 1.1,
-                                                         pvalueCutoff = 1.1)))
+                                                         pvalueCutoff = 1.1,
+                                                         ...)))
                           },
                           cl=numProcessors)
   
@@ -274,7 +276,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
     legendList <- list()
   }
   
-  draw(hm,heatmap_legend_side="top", annotation_legend_list = legendList)
+  hm <- draw(hm,heatmap_legend_side="top", annotation_legend_list = legendList)
   
   invisible (hm)
   
@@ -632,6 +634,12 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   print (columnName)
   log2FC <- mat[,columnName]
   
+  # fgsea fails with infinite values
+  if (any (is.infinite(log2FC))){
+    message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
+    log2FC <- log2FC[is.finite(log2FC)]
+  }
+  
   if (var(log2FC, na.rm = TRUE) == 0){
     message ("No variance detected in ", columnName, " returning NULL to avoid a fgsea crash")
     return (NULL)
@@ -650,11 +658,7 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   # fgsea fails with missing values
   log2FC <- log2FC[!is.na(log2FC)]
   
-  # fgsea fails with infinite values
-  if (any (is.infinite(log2FC))){
-    message (sprintf ("Removing %d infinite values from scores for %s", sum(is.infinite(log2FC)), columnName))
-    log2FC <- log2FC[is.finite(log2FC)]
-  }
+
   
   #nperm=1000, gseaWeightParam = 1, nproc=1
   seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC,  scoreType = scoreType, ...)
