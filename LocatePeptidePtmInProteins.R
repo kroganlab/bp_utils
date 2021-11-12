@@ -95,6 +95,75 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
   return (result)
 }
 
+sitifyProteins_SpectronautFile <- function (specFile.dt, site = "PH", fastaFile = "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz"){
+  stopifnot (site == "PH")  # nothing else supported yet, I think. Def not tested at least
+  shortPTM = tolower(site)
+  
+  
+  mapper <- unique(specFile.dt[,.(ProteinName, specFormat = PeptideSequence)])
+  mapper[, parenLowerCaseFormat := convertSpectronautModificationFormat (specFormat)]
+  # spectronaut will put _ before and after seqeunce.  I don't want those
+  mapper[, parenLowerCaseFormat := gsub("^_|_$", "", parenLowerCaseFormat)]
+  mapper[, uniprotSite := parenLowerCaseToProteinSiteNames(ProteinName, 
+                                                           parenLowerCaseFormat, 
+                                                           shortPTM = shortPTM, 
+                                                           fastaFile = fastaFile)]
+  
+  specFile.dt[mapper,
+              c("ProteinName",   "parenLowerCaseFormat", "oldProteinName") :=
+              .(i.uniprotSite,  i.parenLowerCaseFormat,     ProteinName),
+              on = c("ProteinName", PeptideSequence = "specFormat")]
+  
+  invisible(specFile.dt[])
+
+}
+
+
+
+
+convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC"), keepOnly = NULL, removeAll = FALSE){
+  result <- specModSequence
+  # these are overly complicated because they match both S[Phospho (STY)] and S(Phospho (STY))
+  specFormats <- list (PH='([STY])[[(]Phospho \\(STY\\)[])]',
+                       UB='(K)[[(]GlyGly \\(K\\)[])]',
+                       CAM = '([C])[[(]Carbamidomethyl \\(C\\)[])]',
+                       MOX = '([M])[[(]Oxidation \\(M\\)[])]',
+                       NAC =  '([A-Z_])[[(]Acetyl \\(Protein N-term\\)[])]',
+                       ANY =          '[[(][^][)(]*\\([^][)(]*\\)[])]' )  # suggest regex101.com to parse this visually, paste and then change \\
+
+  artmsFormats <- list (PH='\\1\\(ph\\)',
+                        UB='\\1\\(gl\\)',
+                        CAM = '\\1\\(cam\\)',
+                        MOX = '\\1\\(ox\\)',
+                        NAC = '\\1\\(ac\\)',
+                        ANY = '')  # for removal purposes
+
+  stopifnot(names(specFormats)==names(artmsFormats))
+  
+  if(!is.null(keepOnly) | removeAll == TRUE){
+    mods <- c(keepOnly, "ANY")
+  }
+  
+    
+  for (mod in mods){
+    if (mod %in% names(specFormats)){
+      replace <- artmsFormats[[mod]]
+      if (!is.null(keepOnly) && keepOnly != mod)
+        replace <- ""
+      result <- gsub(specFormats[[mod]], replace, result)
+    }else (message("I don't yet know how to deal with mod: ", mod))
+  }
+  
+  missedMods <- grep ("\\[.*\\]", result, value=TRUE)
+  if (length(missedMods) > 1){
+    message (length(missedMods), " peptides with unexpected modifications: ", paste0(head(missedMods), collapse = ", "))
+  }
+  
+  return (result)
+}
+
+
+
 
 
 
@@ -146,6 +215,93 @@ fastaFileToTable <- function(filePath){
 }
 
 
+loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = TRUE){
+  if (any(grepl(";", ids))){
+    message ("Semicolons detected in uniprot IDs. These are likely multi-protein IDs and should be dealt with prior to looking them up in a file or online. These will be removed.")
+    remove <- grep(";", ids, value = TRUE)
+    ids <- setdiff(ids, remove)
+    message ("\t", paste0(head(remove), collapse = "  "), ifelse(length(remove) > 6, "...", ""))
+  }
+  fasta.dt <- fastaFileToTable (fastaFile)
+  missingUniprots <- setdiff (ids, fasta.dt$uniprot)
+  if (length(missingUniprots) > 0)
+    message (length(missingUniprots), " protein IDs not found in fasta file: ",
+             paste0(head(missingUniprots, 10), collapse = ","),
+             ifelse(length(missingUniprots)>10, ",...", ""))
+  
+  if (downloadFromWeb & length(missingUniprots) > 0){
+    web.up.dt <- downloadUniprotSequences (missingUniprots)
+    up.dt <- rbind (fasta.dt, web.up.dt)
+  }else{
+    up.dt <- fasta.dt
+  }
+  return (up.dt)
+}
+
+#' looks up S(ph) and similar (in the future) modifiaitons in a peptide and mathcing uniprots and returns  uniprot_AApos such as  A0AVK6_S417 and A0AVK6_S413;A0AVK6_S417 for doubly PH-ated
+#' @param uniprots a vector of uniprot IDs
+#' @param parenLowerCaseFormats a vector of peptides like "_INSAPSS[Phospho (STY)]PIK_"; should match `uniprots` (as two columns of a table)
+#' @param shortPTM  "ph" or similar.  For now only "ph" is supported
+#' @param fastaFile string path to the fastaFile from which to lookup the sequences that match `uniprots`
+#' @param downloadFromWeb boolean
+#' @param proteinSiteSep  The string to put between the uniprot and site ID
+parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = "ph", fastaFile = NULL, downloadFromWeb = TRUE, proteinSiteSep = "_"){
+  stopifnot (shortPTM == "ph")  # Only ph is currently supported, I think.
+  mapper <- data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats)
+  
+  # remove all but 1 type of PTM
+  allButMyPTM.regex  <- sprintf("\\((?!%s)[a-z]*\\)", shortPTM) 
+  mapper[, only1PTM := gsub ( allButMyPTM.regex, "",parenLowerCaseFormat, perl = TRUE)]
+
+  
+  # then locate ptm in peptide. Mulitple matches per peptide
+  ptmString <- sprintf("(%s)", shortPTM)
+  mapper[, ptmPositions := stringr::str_locate_all(only1PTM, stringr::fixed (ptmString))]
+  
+  # we have a list of matrices. one matrix per row. expand as many rows as there are sites in the row
+  mapper.expanded <- mapper[lapply(ptmPositions, nrow) > 0,
+                            .(pepSitePTM = ptmPositions[[1]][,"start"] -
+                                # subtract 1 because the (ph) labels the preceding AA, and subtract an additional 4 per each preceding mod
+                                seq(from = 1, by =  stringr::str_length(ptmString), length.out =nrow(ptmPositions[[1]]))  ),
+                            by = .(uniprot, parenLowerCaseFormat, only1PTM)]
+  
+  mapper.expanded[, cleanPeptide := gsub(ptmString, "", only1PTM, fixed = TRUE)]
+  mapper.expanded[, aaPTM := substr(cleanPeptide, pepSitePTM, pepSitePTM)]
+  
+  up.dt <- loadUniprots(unique(mapper.expanded$uniprot), fastaFile, downloadFromWeb)
+
+  # now combine protein sequences with peptide info
+  # merge/modify with up.dt
+  # first count matches in case the peptide is duplicated in the protein
+  mapper.expanded[up.dt, peptideCopies := stringr::str_count(sequence, cleanPeptide),on = "uniprot"]
+  mapper.expanded[is.na(peptideCopies), peptideCopies := 0]
+  
+  if (any (mapper.expanded$peptideCopies == 0)){
+    notMatched <- unique(mapper.expanded[peptideCopies == 0, .(up_pep = paste0(uniprot, "_", parenLowerCaseFormat))]$up_pep)
+    message (length(notMatched), " peptides could not be located within their protein. Likely a few sequences not found in the FASTA. Is this the correct FASTA?","\n\t",
+             "This message can be misleading if you have duplicate uniprot IDs in your FASTA, such as forward and reverse.")
+    print(head(notMatched))
+    message ("The unmatched peptides will be removed from futher analysis")
+    mapper.expanded <- mapper.expanded[peptideCopies > 0]
+  }
+  if (any (mapper.expanded$peptideCopies > 1)){
+    message ("Some peptides are duplicated within their protein.  In these cases only the first possible location will be labeled")
+    print (mapper.expanded[peptideCopies > 1 , 
+                           .(maxCopies = max(peptideCopies), countCopiedPeptides = length(unique(cleanPeptide))),
+                           by = uniprot])
+  }
+  
+  mapper.expanded[up.dt, peptideStart := stringr::str_locate(sequence, cleanPeptide)[,"start"],on = "uniprot"]
+  mapper.expanded[, ptmPos := pepSitePTM + peptideStart -1 ]
+  
+  mapper.collapsed <- mapper.expanded[,.(ptmSiteCombo = paste0(uniprot, proteinSiteSep, aaPTM, ptmPos, collapse = ";")), by = .(uniprot, parenLowerCaseFormat)]
+  
+  # order the table to match the inputs and return the ptmSiteCombo column
+  return (mapper.collapsed[data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats),
+                           ,
+                           on = c("uniprot", "parenLowerCaseFormat")]$ptmSiteCombo)
+  
+}
 
 
 
@@ -161,7 +317,7 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   
   mapper[, modPeptideLC.PTM := convertMassModificationFormat(modPeptide, keepOnly = ptmType)]
   
-  formats <- c(PH = "(ph)") # depends on function convertMassModificationFormat
+  formats <- c(PH = "(ph)") # depends on output of function convertMassModificationFormat
   ptmFormat <- formats[ptmType]
   
   # first locate ptm in peptide. Mulitple matches per peptide
