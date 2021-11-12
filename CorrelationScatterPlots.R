@@ -12,7 +12,6 @@ quickUsage <- function(){
   png(filename = ScriptAndDatedFileName("DIA_MNL_Pairwise_ScatterPlots.png"), width = 8, height = 8, units = "in", res = 200)
   p
   dev.off()
-  
 }
 
 
@@ -56,7 +55,7 @@ PairsPlot <- function(pairsTable, missingXColor = "red", missingYColor = "orange
   missingPlotLocation <- minLog2Int - 0.1 * (maxLog2Int - minLog2Int)
   
   p <- ggplot (pairsTable, aes(x = log2Int.x, y= log2Int.y)) +
-    geom_point(alpha = 0.2, size = 1) +
+    geom_point(alpha = 0.02, size = 1) +
     geom_abline(intercept = 0,  slope = 1, lty = "dotted", color = "gray") +
     geom_density2d() +
     facet_grid(yGroup~xGroup) +
@@ -67,13 +66,13 @@ PairsPlot <- function(pairsTable, missingXColor = "red", missingYColor = "orange
     #missing in one or the other
     p <- p + geom_jitter(data = pairsTable[is.na(log2Int.x)], 
                          mapping = aes(x = missingPlotLocation),
-                         color = missingXColor, alpha = 0.2)
+                         color = missingXColor, alpha = 0.01)
     
   }
   if (any (is.na(pairsTable$log2Int.y))){
     p <- p + geom_jitter(data = pairsTable[is.na(log2Int.y)], 
                          mapping = aes(y = missingPlotLocation),
-                         color = missingYColor, alpha = 0.2)
+                         color = missingYColor, alpha = 0.01)
   }
   
   return (p)
