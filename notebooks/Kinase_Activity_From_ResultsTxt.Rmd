@@ -114,8 +114,8 @@ kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), id
 kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
 
 message ("Writing out kinase results to same directory as results.txt ", results.txt)
-fwrite (kinActFull.scores, gsub(".txt", ".kinaseSummaryScores.csv", results.txt))
-fwrite (kinActFull.mapped, gsub(".txt", "kinaseSubstrateData.csv", results.txt))
+fwrite (kinActFull.scores, gsub("(.txt|.csv|)$", ".kinaseSummaryScores.csv", results.txt))
+fwrite (kinActFull.mapped, gsub("(.txt|.csv|)$", "kinaseSubstrateData.csv", results.txt))
 
 ```
 

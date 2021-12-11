@@ -501,6 +501,40 @@ prepare_AMSS_ResultsFile <- function(resultsDT, column = "Protein"){
 
 
 
+# Other Kinase related info ----
+
+
+#strong functional scores from Beltrao paper
+#https://www.ncbi.nlm.nih.gov/pmc/articles/PMC7100915/
+#Supplemental table s3 has the scores per uniprot and site
+LoadFunctionalScores_PHSite_Beltrao <- function(path = "../../bp_utils/data/EMS84831-supplement-Table_S3.xlsx"){
+  sfs <- openxlsx::read.xlsx (path)
+  setDT(sfs)
+  return(sfs[])
+}
+
+#https://www.phosphosite.org/downloads/Regulatory_sites.gz
+LoadRegulatoryKinasePhosphoSites <- function(path = "../../bp_utils/data/Regulatory_sites.gz",
+                                             species = "human"){
+  reg <- fread(path, skip = 2, fill = TRUE)
+  reg <- reg[ORGANISM == tolower(species) & 
+               grepl ("kinase", PROT_TYPE) &
+               grepl ("-p$", MOD_RSD)]
+  
+  
+  reg[, activating := grepl("activity, induced", ON_FUNCTION)]
+  reg[, inhibiting := grepl("activity, inhibited", ON_FUNCTION)]
+  reg[, interaction.regulating := grepl("molecular association, regulation", ON_FUNCTION)]
+  
+  reg[, uniprot_site := paste0(ACC_ID, "_", tstrsplit(MOD_RSD, "-")[[1]])]
+  reg[, gene_site := paste0(GENE, "_", tstrsplit(MOD_RSD, "-")[[1]])]
+  
+  
+  return (reg[])
+}
+
+
+
 
 
 

@@ -11,7 +11,9 @@ downloadHumanIDDatMap <- function(saveFile = file.path(localDir,"data/human.unip
   fwrite(human.idmap.dat, file=saveFile)
 }
 
-loadHumanIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/human.uniprot.idmap.dat.gz")){
+loadHumanIDDatMap <- function(reload=FALSE, path = NULL){
+  if (is.null(path))
+    path <- file.path(localDir,"data/human.uniprot.idmap.dat.gz")
   createTime <- file.info(path)$ctime
   if (is.na(createTime)){
     message ("Local ID mapping file doesn't exist at ", path, " reloading.")
@@ -241,13 +243,13 @@ translateString2Uniprot.usingUniprotData <- function (stringIDs, species = "MOUS
 
 
 
-translateUniprot2GeneName.datFile <- function(uniprots, species="HUMAN"){
+translateUniprot2GeneName.datFile <- function(uniprots, species="HUMAN", path = NULL){
   if (toupper(species) == "HUMAN"){
-    idMapper <- loadHumanIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
+    idMapper <- loadHumanIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
   }else if (toupper(species) == "MOUSE"){
-    idMapper <- loadMouseIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
+    idMapper <- loadMouseIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
   }else if (toupper(species) == "RAT"){
-    idMapper <- loadRatIDDatMap()[idType == "Gene_Name",] #has columns uniprot,idType,id
+    idMapper <- loadRatIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
   }
   setnames(idMapper, old=c("id"), new=c("geneName"))
   idMapper[match(uniprots, uniprot), geneName]
@@ -411,8 +413,12 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 }
 
 translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE){
-  if (useDatFile){
-    return(translateUniprot2GeneName.datFile(uniprots, species))
+  if (useDatFile != "FALSE"){
+    if ("character" %in% class(useDatFile))
+      path = useDatFile
+    else
+      path = NULL
+    return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
   }
   if (species == "HUMAN"){
     geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")

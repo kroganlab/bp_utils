@@ -576,11 +576,19 @@ results <- fread (results.txt)
 results[,sig := "not"]
 results[pvalue < 0.01 & abs(log2FC) > 1, sig := ifelse(log2FC  <0, "down", "up")]
 
-source (file.path(githubKroganLab, "bp_utils", "KinaseActivityScores.R"))
-results <- expandProteinToSingleSites(results)
+# source (file.path(githubKroganLab, "bp_utils", "KinaseActivityScores.R"))
+# results <- expandProteinToSingleSites(results)
+
+# deal with multiproteins
+# multiproteins will be excluded from enrichment by the enrichment process itself 
+# because (e.g.) the string "A0A0B4J2F2;P57059" does not match any uniprot exactly (likewise for genes)
+results[, uniprot := strsplit(gsub( "_[STY][0-9]+(;|$)", "\\1",  Protein),";") |>
+          lapply(FUN = unique) |>
+          sapply(FUN = paste, collapse = ";")]
+
 
 source (file.path(githubKroganLab, "bp_utils", "UniprotIDMapping.R"))
-results[, gene := translateUniprot2GeneName(singleProtein, species = "HUMAN")]
+results[, gene := multiUniprots2multiGenes(uniprot, species = "HUMAN")]
 
 geneGroups <- unique(results[sig != "not" & is.finite(log2FC), .(gene, group = Label)])
 universe <- unique(results$gene)

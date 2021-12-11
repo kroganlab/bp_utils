@@ -147,7 +147,7 @@ fitPoly.MultiplePowers <- function(data,
   # gather some stats
   # general fit statistics
   pF.summaries <- sapply (lms, pFSummaryLm)
-  r.squared <- sapply (lms, function(model)summary(model)$r.squared)
+  r.squared <- sapply (lms, function(model)summary(model)$r.squared)2020_10_07_Clean_Analysis.Rmd
   
   # does incrementing a power help a significant amount?
   if (length(powerRange) > 1){

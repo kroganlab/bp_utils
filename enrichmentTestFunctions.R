@@ -99,8 +99,9 @@ simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTabl
     winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
     message (length(unique(winners[[termColumn]])), " representative terms choosing the BROADEST significant term per term-cluster per ", groupColumn)
   }else{
-    setorder(clusterInfo, pvalueColumn)
-    winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[1],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    # setorder(clusterInfo, cols = pvalueColumn)
+    # winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[1],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    winners <- clusterInfo[clusterInfo[[pvalueColumn]] < max_pAdjust,.SD[which.min(.SD[[pvalueColumn]]),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
     message (length(unique(winners[[termColumn]])), " representative  terms choosing the MOST significant term per term-cluster per ", groupColumn)
   }
   result <- enrichResultsTable[enrichResultsTable[[termColumn]] %in% winners[[termColumn]],]
@@ -374,7 +375,8 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 
 
 
-loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", keyType = c("UNIPROT", "SYMBOL")){
+loadGmtFromBioconductor <- function (dbName = "org.Hs.eg.db", ontology = "BP", keyType = "UNIPROT"){ #c("UNIPROT", "SYMBOL"
+  message ("Using package ", dbName, " version ", packageVersion(dbName))
   GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
   gmt <- rbindlist(lapply (GO$EXTID2PATHID, function(x) data.table(ont.id = x)), idcol="gene")
   gmt$ont <- GO$PATHID2NAME[gmt$ont.id]
@@ -385,6 +387,13 @@ loadGmtFromBioconductor <- function (dbName = "org.Mm.eg.db", ontology = "BP", k
 
 
 loadKegg <- function (organism=c("hsa", "mmu")[1], keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
+  message ("Current version of KEGG (clusterProfiler might use its cache, look for download messages below the KEGG Info)\n", format(Sys.time(), "%Y_%m_%d"))
+  # download and display current kegg info:
+  f <- tempfile()
+  utils::download.file("http://rest.kegg.jp/info/kegg", f)
+  message(paste0(readLines(f), collapse = "\n"))
+  
+  
   KEGG <- clusterProfiler:::prepare_KEGG(organism, "KEGG", keyType)
   gmt <- rbindlist(lapply (KEGG$EXTID2PATHID, function(x) data.table(ont.id = x)), idcol="gene")
   gmt$ont <- KEGG$PATHID2NAME[gmt$ont.id]
