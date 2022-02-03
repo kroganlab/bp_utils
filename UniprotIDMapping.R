@@ -412,20 +412,33 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
   }
 }
 
+
 translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE){
-  if (useDatFile != "FALSE"){
+  translateUniprot2Something(uniprots, something = "SYMBOL", 
+                             species, useDatFile, fillMissing)
+}
+
+translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", fillMissing = FALSE, useDatFile = FALSE) {
+  if (useDatFile != FALSE){
+    if (something != "SYMBOL"){
+      stop("Currently only know how to use dat file for gene `SYMBOL`")
+    }
     if ("character" %in% class(useDatFile))
       path = useDatFile
     else
       path = NULL
     return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
   }
+  
+  
+  # do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
+  
   if (species == "HUMAN"){
-    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
   }else if (species == "MOUSE"){
-    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
   }else if (species == "RAT"){
-    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprots), 'SYMBOL', 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
   } else {
     stop("unrecognized species", species)
   }
@@ -460,7 +473,7 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
   mapTable <- mapTable[geneNames]
   if (fillMissing == TRUE){
     # where gene lookup failed, assign the original uniprot
-    mapTable[is.na(uniprot), uniprot := geneName]
+    mapTable[is.na(uniprot), uniprot := gene]
   }
   return (mapTable$uniprot)
 }

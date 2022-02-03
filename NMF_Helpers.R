@@ -74,7 +74,8 @@ loadNMFBasisVectors <- function (fileName) {
 #' if >= 1 it is taken as the number of columns to require.
 #' @param dcast.formula a two sided formula describing the rows~columns of the matrix
 #' @param logIntColumn a column name to pass to dcast for value.var. Expected to be log transformed intensity
-PrepareProteinLinearMat <- function (protQuant, requireComplete = 0.5, dcast.formula = Protein~SUBJECT_ORIGINAL, logIntColumn  = "LogIntensities"){
+PrepareProteinLinearMat <- 
+  function (protQuant, requireComplete = 0.5, dcast.formula = Protein~SUBJECT_ORIGINAL, logIntColumn  = "LogIntensities"){
   prot.mat <- as.matrix(dcast(protQuant, dcast.formula, value.var = logIntColumn), rownames = as.character(dcast.formula[[2]]))
   numNotMissing <- apply (prot.mat, 1, function(x)sum(!is.na(x)))
   #hist(numNotMissing)
@@ -91,3 +92,61 @@ PrepareProteinLinearMat <- function (protQuant, requireComplete = 0.5, dcast.for
   linear.mat[is.na(linear.mat)] <- 0.0
   return (linear.mat)
 }
+
+
+
+
+#' Makes use of NNLM::nnmf to estimate background contributions to individual proteins in APEX datasets
+#' It does this by first defining a H0 row matrix which matches the expected contribution of a background basis
+#' This H0 row matrix is calculated by assuming that the endogenous biotin carboxylases are 100% the result of background
+#' and that all background will correlate with these.
+#' Normalization offsets are calculated by median polish on the background-subtracted intensity matrix. Thus the result
+#' will be a dataset with the backgrounds not normalized (beware!) but with the non-backgrounds normalized.
+#' https://github.com/linxihui/NNLM for NNLM info/code
+#' @param protQuant data.table version of MSstats::dataProcess()$RunlevelData
+#' @param k integer specifying number of ranks in addition to background. Most often should be set to approximately the number of conditions (probably)
+#' @param biotin.carboxylases gene names or uniprot IDS that match Protein in protQuant. 
+NormalizeToNonEndogenousBiotin <- function (protQuant, k = 5, 
+                                            biotin.carboxylases = c("ACACA","PC","ACACB","PCCA","MCCC1"),
+                                            biotin.carboxylases.up = c("O00763","P05165","P11498","Q13085","Q96RQ3")){
+  linear.mat <- PrepareProteinLinearMat(protQuant, dcast.formula = Protein~GROUP_ORIGINAL+SUBJECT_ORIGINAL)
+  bcRows <- intersect (rownames(linear.mat), c(biotin.carboxylases, biotin.carboxylases.up))
+  if (length(bcRows) > 0){
+    message (sprintf("Using %d known background proteins as pure background indicators: ", length(bcRows)), paste0(bcRows, collapse = ", "))
+  }else{
+    stop("No known background proteins in protQuant")
+  }
+  #row matrix to match background:
+  bg <- matrix(apply (linear.mat[bcRows,],2, median),
+               nrow =1 )
+  colnames(bg) <- colnames(linear.mat)
+  print (round(100*bg))
+  
+  print ("Calculating NMF with fixed background coefficients")
+  nmf.res <- NNLM::nnmf(linear.mat, k, n.threads = 0,
+                  init = list(H0 = bg) )
+  
+  tmp <- nmf.res$H
+  tmp <- sweep (tmp, 1, apply(tmp,1, max), "/")
+  draw(Heatmap (tmp, cluster_columns = FALSE, cluster_rows = FALSE, col = c("white", "firebrick")))
+  draw(Heatmap (tmp, cluster_columns = TRUE, cluster_rows = FALSE, col = c("white", "firebrick")))
+  
+  # here we subtract the background from the NMF fitted values.  Alternatively we could subtract from the original linear.mat
+  bg.subtracted <- (nmf.res$W %*% nmf.res$H)  - (nmf.res$W[,k+1, drop = FALSE] %*% nmf.res$H[k+1,, drop = FALSE])
+  # close to zero is basically zero and not trustworthy once we convert to log space (2^-10 and 2^-15 are not significantly different)
+  # here we say we don't trust any log2FC > 10, or that 0.001 is same as zero.
+  bg.subtracted[bg.subtracted < 2^-10] <- NA
+  
+  offsets <-  medpolish(log2(bg.subtracted), na.rm = TRUE)$col
+  print (round(offsets, 2))
+  
+  message ("Modifying protQuant.  Adding new columns normalizeOffset, preNormalize and over-writing values in LogIntensities")
+  protQuant[, normalizeOffset := offsets[originalRUN]]
+  protQuant[, preNormalize := LogIntensities]
+  protQuant[, LogIntensities := preNormalize - normalizeOffset]
+  
+  invisible(protQuant[])
+}
+
+
+

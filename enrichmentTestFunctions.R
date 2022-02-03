@@ -39,6 +39,37 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
   return (enrichTable)
 }
 
+#' Compute an odds ratio using the text columns GeneRatio and BgRatio from the typical clusterProfiler output
+#' The odds ratio is the ratio of odds between the selected and not selected groups for matching the term or not.
+#' Thus we have to compute three numbers from GeneRatio and BgRatio:
+#'     selectNoTerm:      those in our selection that don't match the term
+#'     notSelectWiTerm:   those not selected that match the term
+#'     notSelectNoTerm:   those not selected that don't match the term.
+#' @param GeneRatio text column with entries in format 12/200 where 200 is the number of selected genes and 12 the number of those that match the term
+#' @param BgRatio  text column with entries in format 120/2000 where 2000 is the number genes in the universe and 120 the number of those that match the term 
+#' 
+#' @return  a numeric vector of odds ratios, >1 implies more term matches observed in selected set than expected
+#' 
+OddsRatioFromEnricherRatios <- function (GeneRatio, BgRatio){
+  selectParts <- tstrsplit(GeneRatio, "/")
+  selectWiTerm <- as.integer(selectParts[[1]])
+  selectTotal <- as.integer(selectParts[[2]])
+  selectNoTerm <- selectTotal - selectWiTerm  #
+  
+  bgParts <- tstrsplit(BgRatio, "/")
+  bgWiTerm <- as.integer(bgParts[[1]])
+  bgTotal <- as.integer (bgParts[[2]])
+  bgNoTerm <- bgTotal - bgWiTerm
+  
+  notSelectWiTerm <- bgWiTerm - selectWiTerm  #
+  notSelectNoTerm <- bgNoTerm - selectNoTerm  #
+  
+  oddsRatio <- (selectWiTerm/selectNoTerm)/
+               (notSelectWiTerm/notSelectNoTerm)
+  
+  return (oddsRatio)
+}
+
 
 simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTable, gmt, groupColumn=NULL, 
                                                        cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01,
@@ -176,7 +207,7 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   
   if (broadest){
     winners <- clusterInfo[p.adjust < max_pAdjust,.SD[which.max(setSize),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
-    message (length(unique(winners$ID)), " representative GO terms choosing the BROADEST significant term per GO-cluster per ", groupColumn)
+    message (length(unique(winners$ID)), " representative GO terms choosing the BROADEST (in GO) significant term per GO-cluster per ", groupColumn)
   }else{
     winners <- clusterInfo[p.adjust < max_pAdjust,.SD[which.min(p.adjust),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
     message (length(unique(winners$ID)), " representative GO terms choosing the MOST significant term per GO-cluster per ", groupColumn)
@@ -240,12 +271,15 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
   if(!is.null(upperThreshold))
     colors <- circlize::colorRamp2(breaks =seq(0, upperThreshold, length.out = 100), colors = colors)
   
-  heatmap_legend_param = list(legend_direction="horizontal", title = "global enrich\n-log10(adj.p)")
+  heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)") #global enrich\n
   
   if (!is.null(negCols)){
-    colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
+    limit <- ifelse(is.null (upperThreshold), 4, upperThreshold)
+    
+    #colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
+    colors <- circlize::colorRamp2 (breaks=seq(from=-limit, to = limit, length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
     main.mat[,negCols] = -main.mat[, negCols]
-    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-4,-2,0,2,4), labels = c(4,2,0,2,4)) )
+    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-limit,-limit/2,0,limit/2,limit), labels = c(limit,limit/2,0,limit/2,limit)) )
   }
   
   

@@ -514,11 +514,12 @@ LoadFunctionalScores_PHSite_Beltrao <- function(path = "../../bp_utils/data/EMS8
 }
 
 #https://www.phosphosite.org/downloads/Regulatory_sites.gz
+# Kinases only!
 LoadRegulatoryKinasePhosphoSites <- function(path = "../../bp_utils/data/Regulatory_sites.gz",
                                              species = "human"){
   reg <- fread(path, skip = 2, fill = TRUE)
   reg <- reg[ORGANISM == tolower(species) & 
-               grepl ("kinase", PROT_TYPE) &
+               grepl ("kinase", PROT_TYPE, ignore.case = TRUE) &
                grepl ("-p$", MOD_RSD)]
   
   
@@ -533,8 +534,26 @@ LoadRegulatoryKinasePhosphoSites <- function(path = "../../bp_utils/data/Regulat
   return (reg[])
 }
 
-
-
+# Alll phospho-proteins
+LoadPhosphoSiteRegulationDirection <- function(path = "../../bp_utils/data/Regulatory_sites.gz",
+                                               species = "human"){
+  reg <- fread(path, skip = 2, fill = TRUE)
+  reg <- reg[ORGANISM == tolower(species) & 
+               grepl ("-p$", MOD_RSD)]
+  
+  
+  reg[, activating := grepl("activity, induced", ON_FUNCTION)]
+  reg[, inhibiting := grepl("activity, inhibited", ON_FUNCTION)]
+  reg[, interaction.regulating := grepl("molecular association, regulation", ON_FUNCTION)]
+  
+  reg[, uniprot_site := paste0(ACC_ID, "_", tstrsplit(MOD_RSD, "-")[[1]])]
+  reg[, gene_site := paste0(GENE, "_", tstrsplit(MOD_RSD, "-")[[1]])]
+  
+  dir <- reg[activating == !inhibiting, .(uniprot_site, gene_site, direction = ifelse(activating, 1, -1))]
+  
+  
+  return (dir[])
+}
 
 
 

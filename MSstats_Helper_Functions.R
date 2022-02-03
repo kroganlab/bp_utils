@@ -129,6 +129,33 @@ makeContrast.regEx <- function(mssQ, regEx){
   return (contrastMat)  
 }
 
+makeContrast.AllByAll <- function(mssQ){
+  columnNames <- as.character(levels(mssQ$RunlevelData$GROUP_ORIGINAL))
+  
+  positives = c()
+  negatives = c()
+  for (i in columnNames){
+    for (j in columnNames){
+      if(i < j){
+        positives <- c(positives,i)
+        negatives <- c(negatives,j)
+      }
+    }
+  }
+  contrasts <- data.table (positives, negatives)
+  contrasts[,name := paste(positives,negatives, sep="-")]
+  
+  contrastMat <- matrix(rep(0,length(columnNames) * nrow(contrasts)), nrow=nrow(contrasts), ncol=length(columnNames),
+                        dimnames = list(contrasts$name, columnNames))
+  
+  for (i in seq_len(nrow(contrasts))){
+    #rows are named according to the positive condition:
+    contrastMat[contrasts$name[i],contrasts$negatives[i]] = -1
+    contrastMat[contrasts$name[i],contrasts$positives[i]] =  1
+  }
+  return (contrastMat)  
+}
+
 
 
 
@@ -180,5 +207,53 @@ specFileToCompleteMSstats <- function(specFile){
   specFile.complete <- merge (full.peptide.ions.runs, specFile, all.x=TRUE, 
                               by = intersect(colnames(full.peptide.ions.runs),
                                              colnames(specFile)))
+
+  print ("Not adding IsotopeLabelType to table. You likely need to add it like this: mss[, IsotopeLabelType := 'L']")
+  
   return (specFile.complete)
 }
+
+
+
+
+# A few experimental functions for different volcano like statistics ---- 
+#  
+
+lowerConfidenceInterval <- function (log2FC, SE, DF, p = 0.025){
+  # work with positive numbers as much as possible, so we want right side of distribution
+  # p should be > 0.5
+  if (p < 0.5) p <- 1-p
+  
+  direction <- sign(log2FC)
+  tError <- qt ( p, DF)
+  
+  
+  
+  result <- direction *(abs(log2FC) - (tError * SE))
+  result <- ifelse(sign(result) != direction, 0, result)
+  result
+}
+# Usage: 
+# results[, log2FC.95ci := lowerConfidenceInterval(log2FC, SE, DF)]
+
+
+pFromTNonZero <- function (log2FC, SE, DF, threshold = 0.0){
+  # work in the positive direction for simplicity
+  log2FC <- abs(log2FC)
+  t <- (log2FC - threshold)/SE
+  pt(t, DF, lower.tail = FALSE)
+}
+
+# Usage
+# results[, pGt1 := pFromTNonZero(log2FC, SE, DF, 1.0)]
+
+
+pFromT.S0 <- function (log2FC, SE, DF, S0=0){
+  t <- log2FC/(SE + S0)
+  pt(abs(t), DF, lower.tail = FALSE) * 2
+}
+
+# Usage
+# results[, testP := pFromT(log2FC, SE, DF, S0 = 0.05)]
+
+# ---- 
