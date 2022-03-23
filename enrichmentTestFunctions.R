@@ -262,26 +262,29 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              row_names_gp = gpar(fontsize(10)),
                              column_names_gp = gpar(fontsize = 10),
                              upperThreshold = NULL,
+                             colors = NULL,
                              ...){
-  # by default we pass a long vector of colors and let ComplexHeatmap define the ranges
-  Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
-  colors <- Blues(100)
-  
-  # if we get an upperTreshold, we define the limits in the colors object
-  if(!is.null(upperThreshold))
-    colors <- circlize::colorRamp2(breaks =seq(0, upperThreshold, length.out = 100), colors = colors)
-  
+
   heatmap_legend_param = list(legend_direction="horizontal", title = "-log10(adj.p)") #global enrich\n
   
-  if (!is.null(negCols)){
-    limit <- ifelse(is.null (upperThreshold), 4, upperThreshold)
+  if (is.null(colors)){  # by default we pass a long vector of colors and let ComplexHeatmap define the ranges
+    Blues = colorRampPalette(RColorBrewer::brewer.pal(9, brewerPalette))
+    colors <- Blues(100)
     
-    #colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
-    colors <- circlize::colorRamp2 (breaks=seq(from=-limit, to = limit, length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
-    main.mat[,negCols] = -main.mat[, negCols]
-    heatmap_legend_param = c (heatmap_legend_param, list(at=c(-limit,-limit/2,0,limit/2,limit), labels = c(limit,limit/2,0,limit/2,limit)) )
-  }
-  
+    # if we get an upperTreshold, we define the limits in the colors object
+    if(!is.null(upperThreshold))
+      colors <- circlize::colorRamp2(breaks =seq(0, upperThreshold, length.out = 100), colors = colors)
+    
+    
+    if (!is.null(negCols)){
+      limit <- ifelse(is.null (upperThreshold), 4, upperThreshold)
+      
+      #colors <- circlize::colorRamp2 (breaks=seq(from=-max(main.mat), to = max(main.mat), length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
+      colors <- circlize::colorRamp2 (breaks=seq(from=-limit, to = limit, length.out=101), colors =colorRampPalette(rev(RColorBrewer::brewer.pal(11, "RdBu")))(101))
+      main.mat[,negCols] = -main.mat[, negCols]
+      heatmap_legend_param = c (heatmap_legend_param, list(at=c(-limit,-limit/2,0,limit/2,limit), labels = c(limit,limit/2,0,limit/2,limit)) )
+    }
+  }  
   
   ##Plot main figure heatmap
   hm <- ComplexHeatmap::Heatmap(main.mat, col = colors, border = border, rect_gp = gpar(col = "grey", lwd = 1),
