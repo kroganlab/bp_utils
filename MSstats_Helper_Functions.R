@@ -1,16 +1,19 @@
 
 
 
-subsetDataProcessOutput <- function(mssquant.full, groups = NULL, proteins = NULL, newRunLevelData = NULL){
+subsetDataProcessOutput <- function(mssquant.full, groups = NULL, proteins = NULL, subjects = NULL, newRunLevelData = NULL){
   subset <- list()
   subset$ProcessedData <- data.table(mssquant.full$ProcessedData)[ (is.null(groups) | GROUP_ORIGINAL %in% groups) &
-                                                                     (is.null(proteins) | PROTEIN %in% proteins),]
+                                                                     (is.null(proteins) | PROTEIN %in% proteins) &
+                                                                     (is.null(subjects) | SUBJECT_ORIGINAL %in% subjects),]
   if (is.null(newRunLevelData)){
     subset$RunlevelData <- data.table(mssquant.full$RunlevelData)[(is.null(groups) | GROUP_ORIGINAL %in% groups) &
-                                                                    (is.null(proteins) | Protein %in% proteins),]
+                                                                    (is.null(proteins) | Protein %in% proteins)&
+                                                                    (is.null(subjects) | SUBJECT_ORIGINAL %in% subjects),]
   } else{
     subset$RunlevelData <- data.table(newRunLevelData)[(is.null(groups) | GROUP_ORIGINAL %in% groups) &
-                                                         (is.null(proteins) | Protein %in% proteins),]
+                                                         (is.null(proteins) | Protein %in% proteins)&
+                                                         (is.null(subjects) | SUBJECT_ORIGINAL %in% subjects),]
     
     #make the subjects match based on RUN to allow for renaming of subjects for different nested design
     rld <- unique(subset$RunlevelData[,.(RUN, originalRUN, GROUP, GROUP_ORIGINAL, SUBJECT_ORIGINAL, SUBJECT_NESTED, SUBJECT)])
