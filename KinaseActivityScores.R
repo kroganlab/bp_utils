@@ -47,7 +47,7 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "./data/PSP&NetworKIN_Kinas
 #     resources to select source of enz-sub information see get_ptms_resources for options
 
 
-loadKinaseDataOmniPath <- function(species = "HUMAN", ...){
+loadKinaseDataOmniPath <- function(species = "HUMAN", removeNonKinases = TRUE, ...){
   species <- toupper(species)
   organismID <- c(HUMAN = 9606, RAT = 10116, MOUSE = 10090)[species]
   if(is.na(organismID))
@@ -57,25 +57,29 @@ loadKinaseDataOmniPath <- function(species = "HUMAN", ...){
   # for consistency with loadKinaseData I need columns: "CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"
 
   if (any(grepl("ProtMapper", enzsub$sources))){
-    message ("OmniPath includes ProtMapper data which has many non-kinases. Removing all enzymes that are not kinases according to org.Hs.eg.db GO:0016301")
-    # get GO kinase list
-
-    if (species == "HUMAN"){
-      library(org.Hs.eg.db)
-      kinaseTable <- AnnotationDbi::select (org.Hs.eg.db, get(c("GO:0016301"), org.Hs.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
-    } else if (species == "MOUSE"){
-      library(org.Mm.eg.db)
-      kinaseTable <- AnnotationDbi::select (org.Mm.eg.db, get(c("GO:0016301"), org.Mm.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
-    } else{
-      stop ("I don't yet know how to find kinases for ", species)
+    message ("OmniPath includes ProtMapper data which has many non-kinases.")
+    
+    if(removeNonKinases == TRUE) {
+      message ("Removing all enzymes that are not kinases according to org.Hs.eg.db GO:0016301")
+      # get GO kinase list
+      
+      if (species == "HUMAN"){
+        library(org.Hs.eg.db)
+        kinaseTable <- AnnotationDbi::select (org.Hs.eg.db, get(c("GO:0016301"), org.Hs.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
+      } else if (species == "MOUSE"){
+        library(org.Mm.eg.db)
+        kinaseTable <- AnnotationDbi::select (org.Mm.eg.db, get(c("GO:0016301"), org.Mm.egGO2ALLEGS), c("ENTREZID", "GENENAME", "SYMBOL")) 
+      } else{
+        stop ("I don't yet know how to find kinases for ", species)
+      }
+      
+      kinases <- unique(kinaseTable$SYMBOL)
+      #label and filter into a new table
+      enzsub[, is_kinase := enzyme_genesymbol %in% kinases]
+      enzsub <- enzsub[is_kinase == TRUE]
     }
-
-    kinases <- unique(kinaseTable$SYMBOL)
-    #label and filter into a new table
-    enzsub[, is_kinase := enzyme_genesymbol %in% kinases]
-    enzsub <- enzsub[is_kinase == TRUE]
   }
-
+  
     setnames(enzsub, 
            old = c("enzyme_genesymbol", "substrate_genesymbol", "residue_type", "residue_offset", "substrate"), 
            new = c("CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"))
@@ -268,7 +272,7 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
                                     sigKinases = NULL, reverse = FALSE,
                                     useMonoFont = FALSE, useViolin = FALSE,
                                     useSEA = FALSE, reorder = TRUE,
-                                    ncol = 3){
+                                    ncol = 3, labelPoints = FALSE){
   by.col <- c("CTRL_GENE_NAME")
   
   if ("Label" %in% colnames(kinaseMapped)){
@@ -309,10 +313,10 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
   b[,CTRL_GENE_NAME := factor(CTRL_GENE_NAME, levels = kinasesSorted)]
   
   if (reverse){
-    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = sigScore, col = sigScore)) + 
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = Label, fill = sigScore, col = sigScore, label = phSiteCombo)) + 
       facet_wrap(facets = ~CTRL_GENE_NAME, ncol = ncol)
   }else{
-    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = sigScore, col = sigScore)) + 
+    p <- ggplot (b[CTRL_GENE_NAME %in% sigKinases,], aes(x=log2FC, y = CTRL_GENE_NAME, fill = sigScore, col = sigScore, label = phSiteCombo)) + 
       facet_wrap(facets = ~Label, ncol = ncol)
   }
   if (useSEA){
@@ -334,6 +338,12 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
   if (useMonoFont) p <- p + theme(axis.text.y = element_text( size = 10, family = "mono"))
   
 
+  if (labelPoints){
+    p <- p + ggrepel::geom_text_repel(data = b[CTRL_GENE_NAME %in% sigKinases & abs(sigScore) > 1.5,
+                                               .SD[which.max(abs(log2FC))], by = .(Label, CTRL_GENE_NAME)], size = 3 )
+  }
+  
+  
 
   return (p)
 }
