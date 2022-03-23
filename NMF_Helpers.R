@@ -43,7 +43,9 @@ writeNMFMatrices2Excel <- function (nmf, fileName){
 writeNMFListToScriptAndDatedFileName <- function (best.nmfs, fileNameFormat = "nmf.rank%02d.xlsx"){
   lapply(best.nmfs,
          function (n){
-           writeNMFMatrices2Excel(n, ScriptAndDatedFileName(sprintf (fileNameFormat, ncol(NMF::basis(n)))))
+           if(!is.null(n)){
+             writeNMFMatrices2Excel(n, ScriptAndDatedFileName(sprintf (fileNameFormat, ncol(NMF::basis(n)))))
+           }
          }) %>% invisible()
 }
 
@@ -141,7 +143,7 @@ NormalizeToNonEndogenousBiotin <- function (protQuant, k = 5,
   print (round(offsets, 2))
   
   message ("Modifying protQuant.  Adding new columns normalizeOffset, preNormalize and over-writing values in LogIntensities")
-  protQuant[, normalizeOffset := offsets[originalRUN]]
+  protQuant[, normalizeOffset := offsets[paste0(GROUP_ORIGINAL, "_", SUBJECT_ORIGINAL)]]
   protQuant[, preNormalize := LogIntensities]
   protQuant[, LogIntensities := preNormalize - normalizeOffset]
   
