@@ -415,7 +415,7 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 
 translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE){
   translateUniprot2Something(uniprots, something = "SYMBOL", 
-                             species, useDatFile, fillMissing)
+                             species = species, useDatFile = useDatFile, fillMissing = fillMissing)
 }
 
 translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", fillMissing = FALSE, useDatFile = FALSE) {
@@ -560,4 +560,36 @@ geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN"){
   setkey(aliasTable, alias)
   return (aliasTable[geneAliases,]$symbol)
 }
+
+
+library(data.table)
+mouse2HumanUniprotsFullTable <- function(run = FALSE){
+  if(run != TRUE)
+    stop("This function downloads about 100MB of data to build the mouse2Human uniprots table.
+         You've been warned--don't run this in a loop.  Try again and set run = TRUE as its only argument")
+
+  # get the human to mouse mapping from ensembl bioMart, 
+  # these are ensembl gene IDs like this ENSG00000000003 or ENSMUSG00000067377
+  human <- biomaRt::useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+  human2mouse <- setDT(biomaRt::getBM(attributes = c("ensembl_gene_id", "mmusculus_homolog_ensembl_gene"), mart = human))
+
+  
+  #load uniprot mappings to map from ensembl genes to uniprot IDs
+  human.idmap.dat <- fread ("ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz",
+                            header=FALSE)
+  setnames(human.idmap.dat, c("uniprot", "idType", "id"))
+  mouse.idmap.dat <- fread ("ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/MOUSE_10090_idmapping.dat.gz",
+                      header=FALSE)
+  setnames(mouse.idmap.dat, c("uniprot", "idType", "id"))
+  # take relevant subset of idmap.dat
+  ensemble2uniprot.mouse <- mouse.idmap.dat[idType == "Ensembl", .(uniprot.mouse = uniprot, ensembl = id)]
+  ensemble2uniprot.human <- human.idmap.dat[idType == "Ensembl", .(uniprot.human = uniprot, ensembl = id)]
+
+  # do the merges
+  merge.mouse <- merge (human2mouse, ensemble2uniprot.mouse, by.x = "mmusculus_homolog_ensembl_gene", by.y = "ensembl" )
+  merge.mouse.human <- merge (merge.mouse, ensemble2uniprot.human, by.x = "ensembl_gene_id", by.y = "ensembl", allow.cartesian=TRUE)
+  
+  return (merge.mouse.human)
+}
+
 
