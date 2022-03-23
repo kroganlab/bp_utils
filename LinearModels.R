@@ -11,11 +11,12 @@
 #' @param splitColumn  character indicating name of column in fullDataTable that defines the units to compute
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
 
-linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL){
+linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,
+                                     emmeansFormula = NULL, returnLMs = FALSE){
   subsetTables <- split (fullDataTable, fullDataTable[[splitColumn]])
   
   # do al linear models, anova, etc. Result is a list of [[anova, coef]] lists
-  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList)}, cl = cl)
+  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList, emmeansFormula)}, cl = cl)
 
   # get all anova in a  single table
   anovas.list <- lapply(coef.anova.list, `[[`, "anova")
@@ -26,20 +27,37 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   coefs.list <- lapply(coef.anova.list, `[[`, "coef")
   coefTable <- rbindlist(coefs.list, idcol = splitColumn, fill = TRUE)
   
+  # get all contrast in a single table, if any
+  if (!is.null(emmeansFormula)){
+    contrast.list <- lapply (coef.anova.list, `[[`, "contrast")
+    contrastTable <- rbindlist(contrast.list, idcol = splitColumn, fill = TRUE)
+  }else{
+    contrastTable <- NULL
+  }
+    
+  
+  if (returnLMs == TRUE){
+    lms.list <- lapply(coef.anova.list, `[[`, "lms")
+  } else{
+    lms.list <- NULL
+  }
+  
+  
   # get all errors and warnings in a single table
   errors.list <- lapply(coef.anova.list, `[[`, "errWarn")
   errWarnTable <- rbindlist(errors.list, idcol = splitColumn, fill = TRUE)
   errWarnTable[err == "NULL", err := NA]
   errWarnTable[warn == "NULL", warn := NA]
   
-  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable))
+  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list))
 } 
 
 
 
 #' the one-protein linear model computation
 
-.linearModelsOneProtein <- function(subsetDT, formulas ){
+.linearModelsOneProtein <- function(subsetDT, formulas, emmeansFormula){
+  #print (subsetDT$Protein[1])
   lms.out <- lapply (formulas, .errorWarningCatcherFactory(lm), data = subsetDT )
 
   errorWarnTable <- data.table (model = names (lms.out),
@@ -63,10 +81,20 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
                                               `Pr(>F)`< 0.05  ~ "*",
                                               `Pr(>F)`< 0.1  ~ ".",
                                               TRUE ~ "")]
+    # get all contrasts from emmeans
+    if (!is.null(emmeansFormula)){
+      contrasts.list <- lapply(lms, function(l)as.data.table(emmeans::emmeans(l, emmeansFormula)$contrasts))
+      contrastTable <- rbindlist(contrasts.list, idcol = "model")
+      setnames(contrastTable, "p.value", "Tukey.p")
+      contrastTable[, p.t := pt(abs(t.ratio), df = df, lower.tail = FALSE) * 2]
+    }else{
+      contrastTable <- NULL
+    }
+    
   } else{
-    anovaTables <- coef.table <-  NULL
+    anovaTables <- coef.table <- contrastTable <-  NULL
   }
-  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable))
+  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable, contrast = contrastTable, lms = lms))
 }
 
 
