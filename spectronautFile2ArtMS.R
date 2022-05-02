@@ -105,7 +105,7 @@ spectronautFile2ArtMS <- function (filePath, outFilePrefix = NULL, artmsConfig =
   }
   
   
-  invisible(list (evidence_file = evidence, 
+  invisible(list (evidence_file = setDF(evidence), 
                   keys_file = as.data.frame(keys), 
                   config_file = paths["config.yaml"],
                   config_data = configData))
