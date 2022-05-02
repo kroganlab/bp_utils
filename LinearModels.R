@@ -1,6 +1,11 @@
 
 
-
+emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue){  # how does the drug effect change per tissue
+  emm <- emmeans(l, factorFormula)
+  contrast1 <- pairs(emm)
+  contrast2 <- pairs(contrast1, by = NULL, adjust = "none")
+  return (as.data.table(contrast2))
+}
 
 
 
@@ -10,13 +15,16 @@
 #' @param formulaList A list of formulas. They will be computed separately.
 #' @param splitColumn  character indicating name of column in fullDataTable that defines the units to compute
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
+#' @param emmeansFormula  a formula (or other object) passed as second argument to emmeans. It is expected to be
+#'                        used int he context of contrasts so it must produce a $contrasts field in the output
+#' @param postProcessFunction  a function that receives an lm and returns a data.table. See emmeans.contrastOfContrasts for an example 
 
 linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,
-                                     emmeansFormula = NULL, returnLMs = FALSE){
+                                     emmeansFormula = NULL, returnLMs = FALSE, postProcessFunction = NULL){
   subsetTables <- split (fullDataTable, fullDataTable[[splitColumn]])
   
   # do al linear models, anova, etc. Result is a list of [[anova, coef]] lists
-  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList, emmeansFormula)}, cl = cl)
+  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList, emmeansFormula, postProcessFunction)}, cl = cl)
 
   # get all anova in a  single table
   anovas.list <- lapply(coef.anova.list, `[[`, "anova")
@@ -35,7 +43,17 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
     contrastTable <- NULL
   }
     
+
+  # get all postProcess in a single table, if any
+  if (!is.null(postProcessFunction)){
+    pp.list <- lapply (coef.anova.list, `[[`, "postProcess")
+    postProcessTable <- rbindlist(pp.list, idcol = splitColumn, fill = TRUE)
+  }else{
+    postProcessTable <- NULL
+  }
   
+  
+    
   if (returnLMs == TRUE){
     lms.list <- lapply(coef.anova.list, `[[`, "lms")
   } else{
@@ -49,14 +67,14 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   errWarnTable[err == "NULL", err := NA]
   errWarnTable[warn == "NULL", warn := NA]
   
-  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list))
+  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list, postProcess = postProcessTable))
 } 
 
 
 
 #' the one-protein linear model computation
 
-.linearModelsOneProtein <- function(subsetDT, formulas, emmeansFormula){
+.linearModelsOneProtein <- function(subsetDT, formulas, emmeansFormula, postProcessFunction){
   #print (subsetDT$Protein[1])
   lms.out <- lapply (formulas, .errorWarningCatcherFactory(lm), data = subsetDT )
 
@@ -90,11 +108,27 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
     }else{
       contrastTable <- NULL
     }
+    if(!is.null(postProcessFunction)){
+      postProcess.out <- lapply (lms, .errorWarningCatcherFactory(postProcessFunction) )
+      
+      ..errorWarnTable.notUsed <- data.table (model = names (postProcess.out),
+                                    err = as.character(lapply (postProcess.out, `[[`, "err")),
+                                    warn = as.character(lapply (postProcess.out, `[[`, "warn")))
+      
+      postProcess.list <- lapply (postProcess.out, `[[`, "value")
+      postProcess.list <- postProcess.list[!sapply(postProcess.list, is.null)]
+      
+      
+      postProcess <- rbindlist(postProcess.list, idcol = "model")
+    }else{
+      postProcess <- NULL
+    }
     
   } else{
-    anovaTables <- coef.table <- contrastTable <-  NULL
+    # 'initialize' the return values 
+    anovaTables <- coef.table <- contrastTable <- postProcess <-  NULL
   }
-  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable, contrast = contrastTable, lms = lms))
+  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable, contrast = contrastTable, lms = lms, postProcess = postProcess))
 }
 
 
