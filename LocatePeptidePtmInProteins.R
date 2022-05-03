@@ -54,14 +54,33 @@ mehdi_fragpipe_addkeys = function(input_file, keys_file){
 # /end new FragPipe2MSstats.R functions
 
 
+methylationPatterns <- c(single = "K[14.0156]",
+                         double = "K[28.0313]",
+                         triple = "K[42.0470]")
 
-convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", "MOX", "NAC"), keepOnly = NULL, removeAll = FALSE){
+
+convertLysMethylationMassFormat <- function(specModSequence, mods=c("PH",  "CAM", "MOX", "NAC, KMET1, KMET2, KMET3"), keepOnly = NULL, removeAll = FALSE){
+  newMassFormats = c(KMET1 = "(K)\\[14.0156\\]",
+                     KMET2 = "(K)\\[28.0313\\]",
+                     KMET3 = "(K)\\[42.0470\\]")
+  newOutFormats = c(KMET1 = "\\1\\(kmeti\\)",
+                    KMET2 = "\\1\\(kmetii\\)",
+                    KMET3 = "\\1\\(kmetiii\\)")
+  mods <- c(mods, names(newMassFormats))
+  
+  convertMassModificationFormat(specModSequence, mods, keepOnly, removeAll, newMassFormats, newOutFormats)
+}
+  
+
+convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", "MOX", "NAC"), keepOnly = NULL, removeAll = FALSE,
+                                          newMassFormats = character(0), newOutFormats = character(0) ){
   result <- specModSequence
   massFormats <- c(MOX = "(.)\\[15.9949\\]",
                    CAM = "(.)\\[57.0215\\]",
                    PH = "(.)\\[79.9663\\]",
                    NAC = "n\\[42.0106\\](.)",
                    ANY = "n?\\[[0-9.]+\\]")  # used for matching all or all but keepOnly
+  massFormats <- c(massFormats, newMassFormats)
   
   
   artmsFormats <- list (PH='\\1\\(ph\\)',
@@ -70,7 +89,9 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
                         MOX = '\\1\\(ox\\)',
                         NAC = '\\1\\(ac\\)',
                         ANY = '')  # for removal purposes
+  artmsFormats <- c(artmsFormats, newOutFormats)
   
+  stopifnot (all(names(massFormats) %in% names(artmsFormats))) 
   
   if(!is.null(keepOnly) | removeAll == TRUE){
     mods <- c(keepOnly, "ANY")
@@ -117,6 +138,9 @@ sitifyProteins_SpectronautFile <- function (specFile.dt, site = "PH", fastaFile 
   invisible(specFile.dt[])
 
 }
+
+
+
 
 
 
@@ -306,7 +330,7 @@ parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, sh
 
 
 #' @param proteinNames character vector, each in format like `Q9Y6Y0_SLS[79.9663]FEMQQDELIEKPMSPMQYAR`
-#' @param ptmType  one of "PH" or in the future "UB", but for now only "PH"
+#' @param ptmType  one of "PH" or in the future "UB"...also KMET1, KMET2, KMET3
 #' @param fastaFile path to the fasta file, uniprot format, that should match the first field in protein names
 #' @param downloadFromWeb logical TRUE = attempt to download uniprots not found in fasta file from web.
 
@@ -315,9 +339,19 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
   
   mapper[, c("uniprot", "modPeptide") := tstrsplit(fragPipeProteinName, proteinPepSep)]
   
-  mapper[, modPeptideLC.PTM := convertMassModificationFormat(modPeptide, keepOnly = ptmType)]
+  if (ptmType %in% c("KMET1", "KMET2", "KMET3")){
+    mapper[, modPeptideLC.PTM := convertLysMethylationMassFormat(modPeptide, keepOnly = ptmType)]
+  } else{
+    mapper[, modPeptideLC.PTM := convertMassModificationFormat(modPeptide, keepOnly = ptmType)]
+  }
   
-  formats <- c(PH = "(ph)") # depends on output of function convertMassModificationFormat
+  
+  formats <- c(PH = "(ph)",
+               UB = "(gl)",
+               KMET1 = "(kmeti)",
+               KMET2 = "(kmetii)",
+               KMET3 = "(kmetiii)") # depends on output of function convertMassModificationFormat
+  
   ptmFormat <- formats[ptmType]
   
   # first locate ptm in peptide. Mulitple matches per peptide
@@ -342,7 +376,7 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames, ptmType = "PH", fastaFile
                   paste0(head(missingUniprots, 10), collapse = ","),
            ifelse(length(missingUniprots)>10, ",...", ""))
   
-  if (downloadFromWeb){
+  if (downloadFromWeb & length(missingUniprots) > 0){
     web.up.dt <- downloadUniprotSequences (missingUniprots)
     up.dt <- rbind (fasta.dt, web.up.dt)
   }else{
