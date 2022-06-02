@@ -30,9 +30,10 @@ prepareDataForMSStats = function(evidenceFile, keysFile, outfile=NULL){
   #filter
   before = nrow(evAndKeys)
   #filter evidence (empty protein names, groups, contaminants, reversed decoys)
-  evAndKeys <- evAndKeys[!grepl("^$|;|CON__|REV__", Proteins),                       ]
+  #evAndKeys <- evAndKeys[!grepl("^$|;|CON__|REV__", Proteins),                       ]
+  evAndKeys <- evAndKeys[!grepl("^$|CON__|REV__", Proteins),]
   after = nrow(evAndKeys)
-  message ("Filtered ", before-after, " rows from keyed evidence , new size = ", after, "  (empty protein names, groups, contaminants, reversed decoys)")
+  message ("Filtered ", before-after, " rows from keyed evidence , new size = ", after, "  (empty protein names, contaminants, reversed decoys)")
   evAndKeys <- evAndKeys[!is.na(Intensity)]
   evAndKeys <- evAndKeys[Intensity > 0]
   after2 = nrow(evAndKeys)
@@ -49,14 +50,8 @@ prepareDataForMSStats = function(evidenceFile, keysFile, outfile=NULL){
 
   
   #convert to msstatsFormat
-  #fileOut <- 'fullAnalysis/results_noGroups/evAndKeys.mss.txt'
-  #for now I use the artMS function for this, but first have to fix a column name it expects
-  # setnames(evAndKeys, "Modified sequence", "Modified.sequence")
-  # evAndKeys.mss <- artMS:::.artms_getMSstatsFormat(evAndKeys, fraction=FALSE,
-  #                                                  output_name=outfile,
-  #                                                  data_object = TRUE)
-  
-  # main steps above
+
+  # main steps
   # 1 sum up intensity for duplicate features
   # 2 make table complete: add rows with NA intensity for missing values.
   # 3 get columns and names suitable for MSstats
