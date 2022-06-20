@@ -145,7 +145,7 @@ simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTabl
 
 
 simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
-                                                      cutHeight = 0.99, broadest=TRUE, max_pAdjust = 0.01){
+                                                      cutHeight = 0.99, broadest=FALSE, max_pAdjust = 0.01){
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
     return (list (enrichResultsTable, data.frame()))
@@ -258,7 +258,6 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                              show_row_dend = FALSE,
                              border = TRUE,
                              max_pAdjust = 0.01,
-                             top_annotation = NULL,
                              row_names_gp = gpar(fontsize = 10),
                              column_names_gp = gpar(fontsize = 10),
                              upperThreshold = NULL,
@@ -293,7 +292,6 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
                                 column_names_rot = 90, row_names_gp = row_names_gp, column_names_gp = column_names_gp,
                                 show_row_dend = show_row_dend, show_column_dend = show_column_dend, heatmap_legend_param = heatmap_legend_param,
                                 row_names_max_width = 2*max_text_width(rownames(main.mat), gp = gpar(fontsize = 12)),
-                                top_annotation = top_annotation,
                                 cell_fun = function(j, i, x, y, width, height, fill) {
                                   if (!is.null(borderMatrix) & !is.null(borderColFun)){
                                     lwd <- unit(borderMM,"mm")
@@ -314,7 +312,8 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
     legendList <- list()
   }
   
-  hm <- draw(hm,heatmap_legend_side="top", annotation_legend_list = legendList)
+  hm <- draw(hm,heatmap_legend_side="top", annotation_legend_list = legendList,
+             annotation_legend_side = "top")
   
   invisible (hm)
   
@@ -324,7 +323,7 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
                                       negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
-                                      annotatePossibleMatches = TRUE, top_annotation = NULL, row_names_gp = gpar(fontsize = 10),
+                                      annotatePossibleMatches = TRUE,  row_names_gp = gpar(fontsize = 10),
                                       upperThreshold  = NULL,
                                       pvalColumn = "p.adjust", ...){
   setorderv(simplifiedEnrichTable, cols = pvalColumn)
@@ -396,19 +395,51 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
     cols <- colnames(main.mat)
     setkeyv(genesInUniverseCounts, groupColumn)
     topBars <- HeatmapAnnotation(`Group Sizes` = anno_barplot ( genesInUniverseCounts[cols, geneCount] ))
-    if (!is.null(top_annotation)){
-      warning("over writing non-null top annotation with possible matches")
-      #top_annotation <- top_annotation %v% topBars
-    }#else{
-      top_annotation <- topBars
-    #}
+  #   if (!is.null(top_annotation)){
+  #     warning("over writing non-null top annotation with possible matches")
+  #     #top_annotation <- top_annotation %v% topBars
+  #   }#else{
+  #     top_annotation <- topBars
+  #   #}
+  }else{
+    topBars <- NULL
   }
   
-  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = top_annotation, row_names_gp = row_names_gp,
+  hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = topBars, row_names_gp = row_names_gp,
                          upperThreshold = upperThreshold,...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
+
+#' Runs the three main GO (etc) enrichment functions together
+#' 
+
+enrichmentOnGroupsPL <- function (groupTable, geneColumn, groupColumns, gmt,universe = NULL, numProcessors = 1,
+                                  max_pAdjust = 0.1, broadest = FALSE,
+                                  topN = 4, reduceRedundantsAcrossGroups = TRUE,
+                                  ...){
+  
+  
+  enrich.dt  <- enricherOnGroups(groupTable, geneColumn, groupColumns, gmt, universe, numProcessors)
+  groupColumn <- paste(groupColumns, collapse = ".")
+  simp <- simplifyEnrichBySimilarUniverseMembership(enrich.dt, gmt, groupColumn,
+                                                    cutHeight = 0.99, broadest = FALSE,
+                                                    max_pAdjust = max_pAdjust)
+  enrichHM <- enrichHeatmapBestPerGroup(simp[[1]], simp[[2]], 
+                                        groupColumn, topN,
+                                        reduceRedundantsAcrossGroups = reduceRedundantsAcrossGroups,
+                                        max_pAdjust = max_pAdjust,
+                                        ...)
+  
+  return (list(enrich.dt = enrich.dt, simp = simp, hm =  enrichHM))
+  
+}
+
+
+
+
+
+
 
 
 
@@ -676,7 +707,7 @@ limitGMT2PantherGOslim <- function (gmt.dt, fileOrURL = "http://data.pantherdb.o
 #' Given a matrix and a column name perform fgsea on a single column
 #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
 #' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
-oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), ...){
+oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), fgseaFunction = fgsea::fgsea, ...){
   print (columnName)
   log2FC <- mat[,columnName]
   
@@ -707,7 +738,7 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
 
   
   #nperm=1000, gseaWeightParam = 1, nproc=1
-  seaRes <- fgsea::fgsea(pathways = sets, stats = log2FC,  scoreType = scoreType, ...)
+  seaRes <- fgseaFunction(pathways = sets, stats = log2FC,  scoreType = scoreType, ...)
   seaRes[, sigScore := -log10(pval) * ifelse(ES < 0, -1, 1) ]
   return (seaRes)
 }
@@ -715,6 +746,7 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
 #' Given a matrix run fgsea on all columns, return table of results with column "group" identifying the column of the matrix
 #' @param mat
 #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
+#'             can optionally pass a term2gene data.frame with terms in first column and genes/uniprots in second
 #' @param scoreType is chosen based on presence of negative or positive values in the matrix
 #' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
 matrixFGSEA <- function (mat, sets, ...){
