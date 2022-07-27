@@ -104,7 +104,11 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
       contrasts.list <- lapply(lms, function(l)as.data.table(emmeans::emmeans(l, emmeansFormula)$contrasts))
       contrastTable <- rbindlist(contrasts.list, idcol = "model")
       setnames(contrastTable, "p.value", "Tukey.p")
-      contrastTable[, p.t := pt(abs(t.ratio), df = df, lower.tail = FALSE) * 2]
+      if ("t.ratio" %in% colnames(contrastTable)){
+        contrastTable[, p.t := pt(abs(t.ratio), df = df, lower.tail = FALSE) * 2]
+      } else{
+        contrastTable[, p.t := NA]
+      }
     }else{
       contrastTable <- NULL
     }

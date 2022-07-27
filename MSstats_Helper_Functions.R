@@ -97,7 +97,16 @@ makeContrast.artMSFile <- function (contrasts.txt){
 }
 
 
+# 
+checkVersionDataProcessOutput <- function (mssQ){
+  if (!"RunlevelData" %in% names(mssQ)){
+    stop("Wrong version of MSstats. Source MSstats_V4_Functions.R and try again")
+  }
+}
+
+
 makeContrast.regEx <- function(mssQ, regEx){
+  checkVersionDataProcessOutput(mssQ)
   columnNames <- as.character(levels(mssQ$RunlevelData$GROUP_ORIGINAL))
   
   positives = c()
@@ -133,6 +142,7 @@ makeContrast.regEx <- function(mssQ, regEx){
 }
 
 makeContrast.AllByAll <- function(mssQ){
+  checkVersionDataProcessOutput(mssQ)
   columnNames <- as.character(levels(mssQ$RunlevelData$GROUP_ORIGINAL))
   
   positives = c()

@@ -62,7 +62,9 @@ downloadRatIDDatMap<- function(saveFile = file.path(localDir,"data/mouse.uniprot
   fwrite(idmap.dat, file=saveFile)
 }
 
-loadMouseIDDatMap <- function(reload=FALSE, path = file.path(localDir,"data/mouse.uniprot.idmap.dat.gz")){
+loadMouseIDDatMap <- function(reload=FALSE, path = NULL){
+  if (is.null(path))
+    path <- file.path(localDir,"data/mouse.uniprot.idmap.dat.gz")
   createTime <- file.info(path)$ctime
   if (is.na(createTime)){
     message ("Local ID mapping file doesn't exist at ", path, " reloading.")
@@ -427,6 +429,8 @@ translateUniprot2Something <- function (uniprots, something = "SYMBOL", species 
       path = useDatFile
     else
       path = NULL
+    if (fillMissing != TRUE)
+      message("fillMissing is currently ignored when using datFile")
     return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
   }
   
@@ -483,7 +487,7 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
 
 
 
-multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE){
+multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE){
   toGenes <- data.table(uniprots = uniprots)
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
   toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile)]
@@ -496,6 +500,11 @@ multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", si
     stop("unexpected simplify format")
   }
   toGenes <- toGenes[, .(genes = paste(simplify (singleGene), collapse=sep)), by = uniprots]
+  if(!allowDups){
+    duplicatedGeneNames <- unique(toGenes[duplicated(genes)]$genes)
+    toGenes[genes %in% duplicatedGeneNames, genes := paste0(genes, ".", uniprots)]
+  }
+  
   setkey(toGenes, uniprots)
   
   return(toGenes[uniprots, genes])
