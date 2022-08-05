@@ -1,0 +1,13 @@
+This directory contains scripts and code needed to identify and label the 
+leader-genome/subgenome splice sites in RNA reads in fastq files.  It is designed to run
+on UCSF's wynton cluster.
+
+Simple how to: 
+
+1) Copy this whole directory to your home or other working directory on wynton (git clone, scp, etc...)
+2) cd to the copy of this directory
+3) run: bash setup.sh  [path to fastq files]
+4) edit two files generated above as instructed
+5) submit two jobs as instructed
+
+Done!
