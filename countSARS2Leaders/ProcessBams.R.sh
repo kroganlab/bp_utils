@@ -12,11 +12,20 @@
 #$ -l mem_free=16G                  #-- submits on nodes with enough free memory (required)  (will multiply by cores)
 
 
-
-
 module load CBI
 module load r
 
+# pull 
+# total read counts from sgeOut
+cd sgeOut
+grep -m1 "Input:" leaderReadsProcess.sh.o* | awk '{print $1, $2}' > readCounts.map
+grep -m1 "fastq" leaderReadsProcess.sh.o* > fastq.map
+cd ../
+
+Rscript TotalReadCounts.R 
+
+
+# actually process the BAM
 Rscript ProcessBams.R
 
 
