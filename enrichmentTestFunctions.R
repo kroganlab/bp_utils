@@ -145,7 +145,8 @@ simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTabl
 
 
 simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
-                                                      cutHeight = 0.99, broadest=FALSE, max_pAdjust = 0.01){
+                                                      cutHeight = 0.99, broadest=FALSE, max_pAdjust = 0.01,
+                                                      hclustMethod = "complete"){
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
     return (list (enrichResultsTable, data.frame()))
@@ -183,7 +184,10 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
   # maybe this is faster?  I haven't clocked it
   go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
   
-  hc <- hclust(go_dist_mat, method = "ward.D2")
+  if (hclustMethod != "complete" & cutHeight == 0.99){
+      message ("You requested to cluster using method ", hclustMethod, " but didn't change from default cutHeight from 0.99. It is recommended you adjust cutHeight")
+  }
+  hc <- hclust(go_dist_mat, method = hclustMethod)
   
   clusters <- cutree(hc, h=cutHeight)
   clusters <- data.table (cluster = as.numeric(clusters), ID = attributes(clusters)$names )
@@ -772,5 +776,51 @@ matrixFGSEA <- function (mat, sets, ...){
   sea.dt <- rbindlist(all.sea, idcol = "group")
   
   return (sea.dt)
+}
+
+
+# other stuff ###############
+
+
+enrichmentAnnotationHeatmap <- function(enrich.dt = data.table (group = c(), pvalue = c(), term = c(), geneID = c()),
+                                        terms,
+                                        geneGroups = data.table(group = c(), gene = c()),
+                                        matrixRowOrder,
+                                        enrichPColors = c("white", "#807DBA"),      # c("white", RColorBrewer::brewer.pal(9, "Purples")[c(6)])
+                                        goMatchColor = "#3F007D",                   # RColorBrewer::brewer.pal(9, "Purples")[c(9)]
+                                        ...){
+  # this only works if the genes are divided into mutually exclusive groups.  So make sure the number of groups per gene is exactly 1
+  stopifnot (all(geneGroups[, .N, by = gene]$N==1))
+  
+  # define the go binary matrix
+  miniGMT <- unique(enrich.dt[term %in% terms & group %in% unique(geneGroups$group), 
+                              .(gene = unlist(strsplit(geneID, "/"))),
+                              by = .(term) ])
+  go.mat <- dcast (miniGMT[matrixRowOrder, , on = "gene"], # get all genes in table, this will generate an NA column which I clean up below
+                   gene~term, 
+                   fun.aggregate = length)[, `NA` := NULL] |>   
+    as.matrix(rownames = "gene")
+  
+  # go pvalue matrix (by gene)
+  p.mat <- dcast (enrich.dt[term %in% terms
+  ][geneGroups, , on = "group", allow.cartesian = TRUE], #
+  gene~term, value.var = "pvalue") |> 
+    as.matrix(rownames = "gene")
+
+  
+  # enforce good ordering
+  go.mat <- go.mat[matrixRowOrder, terms]
+  p.mat <- p.mat[matrixRowOrder, terms]
+  
+    
+  Heatmap(-log10(p.mat),
+          name = "enrichment\n-log10(pvalue)",
+          col = enrichPColors,
+          layer_fun = function (j, i, x, y, width, height, fill){
+            color <- ifelse(pindex (go.mat,i,j) > 0, goMatchColor, "transparent")
+            grid.rect(x,y,width, height, gp = gpar (fill = color, col = NA))
+          },
+          show_row_dend = FALSE,
+          ...)
 }
 
