@@ -13,15 +13,15 @@
 
 
 fitPoly.MultiplePowers <- function(data,
-                                   polyColumn = "rank.time", otherTerms = c("SUBJECT_ORIGINAL"), yColumn = "LogIntensities",
+                                   polyColumn = "rank.time", otherTerms = c("SUBJECT"), yColumn = "LogIntensities",
                                    powerRange = 1:5, maxSelectedPower = 3, minSelectedPower = 1,
                                    pValueOverall = 0.01, pValueIncrement = 0.05,
                                    start.times = c(0)){
   # for debugging...
-  print (unique(data$gene))
+  #print (unique(data$Protein))
   
-  if (length (otherTerms) != 1 | !"SUBJECT_ORIGINAL" %in% otherTerms )
-    stop("other terms other than SUBJECT_ORIGINAL, or no other terms, is not implemented yet")
+  if (length (otherTerms) != 1 | !"SUBJECT" %in% otherTerms )
+    stop("other terms other than SUBJECT, or no other terms, is not implemented yet")
   
   # some checks...am I getting enough data to not fail...
   if (nrow(data) < 3){
@@ -40,7 +40,7 @@ fitPoly.MultiplePowers <- function(data,
   #
   for (term in otherTerms){
     if(any (c("integer", "numeric") %in% class(data[[term]])))
-      stop(sprintf ("Term %s is numeric or integer type, expect something factor or character"))
+      stop(sprintf ("Term %s is numeric or integer type, expect something factor or character", term))
   }
 
   
@@ -85,9 +85,9 @@ fitPoly.MultiplePowers <- function(data,
     
     # build table of all by all rank.times and subjects that are in the data 
     rank.times <- unique(dt[[polyColumn]])
-    subjects <- unique(lmout$model$SUBJECT_ORIGINAL)#unique(dt$SUBJECT_ORIGINAL)
+    subjects <- unique(lmout$model$SUBJECT)#unique(dt$SUBJECT)
     newData <- data.table::setnames(data.table::data.table(rank.times), polyColumn)[]
-    newData <- newData[, .(SUBJECT_ORIGINAL = subjects), by = c(polyColumn)]
+    newData <- newData[, .(SUBJECT = subjects), by = c(polyColumn)]
     
     # calculate expected values
     newData[,prediction := predict (lmout, newData)]
@@ -111,8 +111,8 @@ fitPoly.MultiplePowers <- function(data,
   
   
   # get the summary f statistic for the whole model.
-  # this includes effects of SUBJECT_ORIGINAL + 
-  # not so useful if there is a strong SUBJECT_ORIGINAL effect...
+  # this includes effects of SUBJECT + 
+  # not so useful if there is a strong SUBJECT effect...
   pFSummaryLm <- function (model){
     f <- summary(model)$fstatistic
     pF <- pf(f["value"], f["numdf"], f["dendf"], lower.tail=FALSE)
@@ -183,9 +183,14 @@ fitPoly.MultiplePowers <- function(data,
   #   bestPower <- minSelectedPower
   
   # or just the best pF.polyColumn 
-  data.table::setorder(stats, pF.polyColumn)
+  data.table::setorder(stats, pF.polyColumn, na.last = TRUE)
   bestPower <- stats[power <=  maxSelectedPower & power >= minSelectedPower,][1,power]
-  
+
+  #if no power in desired range, just take bestPower from top of table:
+  if (is.na(bestPower)){
+    bestPower <- stats[1, power]
+  }
+    
   statsVector["bestPower"] = bestPower
   statsVector["best.pF.polyColumn"] = stats[power == bestPower, pF.polyColumn]
   
@@ -258,6 +263,21 @@ actualMatrixFromPolyFits <- function(polyFits, rowID = "Protein", vsFirstTime = 
 
 
 
+nicePolyFits.fullTable <- function (protQuant, splitColumn = "Protein",
+                                    polyColumn = "rankTime", otherTerms = "SUBJECT",
+                                    yColumn = "LogIntensities", powerRange = 1:3,
+                                    minSelectedPower = 3){
+  proteinTables <- split(protQuant, protQuant[[splitColumn]])
+  
+  
+  pf.out <-  pbapply::pblapply(proteinTables, fitPoly.MultiplePowers,
+                                   polyColumn = "rankTime", otherTerms = "SUBJECT", yColumn = "LogIntensities", powerRange = 1:3, minSelectedPower = 3)
+  dt.out <- rbindlist(pf.out,idcol = "Protein", fill = TRUE, use.names = TRUE)
+  nicePolyFitOutput(dt.out)
+}
+
+
+
 #' take a matrix of non-log-transformed values (actual) and perform a time series fit on each 'receptor'
 #' optionally detrend the matrix using a matrix of predicted values. set predicted to 1 for no detrending
 #' columnInfo is a data table that translates the column names `column` to `receptor`, `time` and `rep`
@@ -269,7 +289,7 @@ detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
   if (is.null(columnInfo)){
     columnInfo <- data.table(column = colnames(actual))[!grepl(spatialReferencePattern, column)]
     columnInfo[, c("receptor", "time", "rep") := tstrsplit (column, split = "[_.]", keep = c(1,2,3))]
-    columnInfo[, SUBJECT_ORIGINAL := factor(sprintf("batch.%s", rep))]
+    columnInfo[, SUBJECT := factor(sprintf("batch.%s", rep))]
     
   }
   # check for duplicates
@@ -300,8 +320,8 @@ detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
     print (g)
     subTables <- split (long[ receptor == g], by = "gene")
     #geneFits <- lapply (subTables, fitPoly.MultiplePowers)
-    geneFits <- parLapply (cl, subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT_ORIGINAL"), yColumn = "detrendLog2Int")
-    #geneFits <- lapply (        subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT_ORIGINAL"), yColumn = "detrendLog2Int")
+    geneFits <- parLapply (cl, subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT"), yColumn = "detrendLog2Int")
+    #geneFits <- lapply (        subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT"), yColumn = "detrendLog2Int")
     fitScores <- rbindlist(geneFits, idcol = "Protein", fill = TRUE)
     allFits[[g]] <- fitScores
   }
