@@ -712,7 +712,7 @@ limitGMT2PantherGOslim <- function (gmt.dt, fileOrURL = "http://data.pantherdb.o
 #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
 #' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
 oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), fgseaFunction = fgsea::fgsea, ...){
-  print (columnName)
+  #print (columnName)
   log2FC <- mat[,columnName]
   
   # fgsea fails with infinite values
@@ -771,7 +771,7 @@ matrixFGSEA <- function (mat, sets, ...){
     sets <- split(sets[[2]], sets[[1]])
   }
   
-  all.sea <- lapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
+  all.sea <- pbapply::pblapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
   names(all.sea) <- colnames(mat)
   sea.dt <- rbindlist(all.sea, idcol = "group")
   
@@ -806,6 +806,13 @@ enrichmentAnnotationHeatmap <- function(enrich.dt = data.table (group = c(), pva
   ][geneGroups, , on = "group", allow.cartesian = TRUE], #
   gene~term, value.var = "pvalue") |> 
     as.matrix(rownames = "gene")
+  
+  # missing values
+  if (any(is.na(p.mat))){
+    message ("not all terms have a p.value in all groups, setting those to p = 1.0")
+    p.mat[is.na(p.mat)] <- 1.0
+    
+  }
 
   
   # enforce good ordering
