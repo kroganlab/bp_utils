@@ -462,7 +462,7 @@ loadKegg <- function (organism=c("hsa", "mmu")[1], keyType = c("uniprot", "kegg"
   message ("Current version of KEGG (clusterProfiler might use its cache, look for download messages below the KEGG Info)\n", format(Sys.time(), "%Y_%m_%d"))
   # download and display current kegg info:
   f <- tempfile()
-  utils::download.file("http://rest.kegg.jp/info/kegg", f)
+  utils::download.file("https://rest.kegg.jp/info/kegg", f)
   message(paste0(readLines(f), collapse = "\n"))
   
   
