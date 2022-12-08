@@ -127,7 +127,30 @@ kinaseActivity.sea <-
   return (seaRes)
 }
 
+# Demonstrating expected usage of function kinaseActivity
+#' @param results a data.table
+#' @param kinaseData a data.table, output of loadKinaseDataOmniPath etc
+kinaseActivityOnResultsFile <- function(results, kinaseData){
+  results[,gene := multiUniprotSites2multiGeneSites(Protein)]
+  singleSiteResults <- prepare_AMSS_ResultsFile(results, column = "gene")
+  
+  labels <- unique(singleSiteResults$Label)
+  
+  kinActList <- lapply (labels, FUN=function(lab){kinaseActivity(singleSiteResults[Label == lab & representative==TRUE],
+                                                                 plots = FALSE,
+                                                                 kinaseData = kinaseData)})
+  names(kinActList) <- labels
+  
+  kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
+  kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
+  list(kinActFull.scores, kinActFull.mapped)
+}
 
+
+
+
+# Meant to be called once per different contrast or "Label" in results file.
+# see function above kinaseActivityOnResultsFile for a code example
 
 kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./data/kinaseSiteList_BachmanGyoriSorger2019.csv.gz",
                             plots=TRUE, outlierLog2FC = 10, requireAAMatch = TRUE, uniprot=FALSE, do.sea = FALSE,
@@ -223,19 +246,8 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   
   cat (sprintf("Computing using %d rows in site-kinase-log2FC table\n",sum(subsetSelector)))
   
-  # summarize per kinase, Z score based on standard error of the mean log2FC per kinase
-  scores <- kinaseMapped[subsetSelector][,.(Z = (unique(.SD)[,mean(log2FC)] - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD, 
-                            N= length(unique(phSiteCombo)),#.N,  # don't double count when two sites are in the same peptide 
-                            meanLog2FC  = mean(log2FC),
-                            sites = paste(unique(paste(Gene_Name, paste0(aa, pos), sep="_")), collapse=",") ),  # 'unique' because some sites will occur multiple times in different phospho-combos
-                         by = CTRL_GENE_NAME,
-                         .SDcols = c("phSiteCombo", "log2FC")]
   
-  # p values.  2*pnorm... makes it two-tailed. This is different from KSEApp, but I think it is more appropriate here where we include both positive and negative effects
-  scores[,pValue := 2*pnorm(-abs(Z), lower.tail= TRUE)]
-  scores[, sigScore := -log10(pValue) * ifelse(Z < 0, -1, 1) ]
-  scores[, fdr.BH := p.adjust(pValue, method = "fdr")]  #method=fdr is alias for "BH" Benjamini & Hochberg
-  scores[,c("bgMean", "bgSD") := .(fullMean, fullSD)]
+  scores <- siteEnrichZScores(kinaseMapped[subsetSelector], fullMean, fullSD)
   
    
   if (do.sea == TRUE){
@@ -266,6 +278,33 @@ kinaseActivity <- function (log2FCData, kinaseData=NULL, kinaseDataFile = "./dat
   }
   return (list(scores = scores, kinaseMapped = kinaseMapped))
 }
+
+# The calculation of scores once all the cleaning of data has been done. Works on an already merged results/annotation file
+#
+#' @param mergedResults a data.table, with log2FC, phSiteCombo, and CTRL_GENE_NAME or with other column specified by termName
+#' @param termName character that is name of column in `mergedResults` to enrich within. (kinase, ubiquitin ligase, etc..) 
+#' @param siteColumn column name in mergedResults to collect in a sites column in the output
+siteEnrichZScores <- function(mergedResults, fullMean = NULL, fullSD = NULL, termName  = "CTRL_GENE_NAME", siteColumn = "singleSite"){
+  if(is.null(fullMean) | is.null(fullSD)) stop("Require calculation of background 'fullMean' and 'fullSD' ahead of time")
+  if ("termName" %in% colnames(mergedResults))
+    warning("termName used as column name. termName column will be used regardless of any value that the termName argument is set to")
+  # summarize per kinase, Z score based on standard error of the mean log2FC per kinase
+  scores <- mergedResults[,.(Z = (unique(.SD)[,mean(log2FC)] - fullMean)*sqrt(length(unique(phSiteCombo)))/fullSD,
+                            N= length(unique(phSiteCombo)),#.N,  # don't double count when two sites are in the same peptide
+                            meanLog2FC  = mean(log2FC),
+                            sites = paste0(sort(unique(.SD[[siteColumn]])), collapse = ";") ),  # 'unique' because some sites will occur multiple times in different phospho-combos
+                         by = termName,
+                         .SDcols = c("phSiteCombo", "log2FC", siteColumn)]
+
+  # p values.  2*pnorm... makes it two-tailed. This is different from KSEApp, but I think it is more appropriate here where we include both positive and negative effects
+  scores[,pValue := 2*pnorm(-abs(Z), lower.tail= TRUE)]
+  scores[, sigScore := -log10(pValue) * ifelse(Z < 0, -1, 1) ]
+  scores[, fdr.BH := p.adjust(pValue, method = "fdr")]  #method=fdr is alias for "BH" Benjamini & Hochberg
+  scores[,c("bgMean", "bgSD") := .(fullMean, fullSD)]
+  return (scores[])
+}
+
+
 
 BarplotKinaseActivities <- function(scores, kinaseMapped, 
                                     max_pValue = 1.0, max_fdr = 1.0, min_N = 2,
