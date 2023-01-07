@@ -379,7 +379,7 @@ BarplotKinaseActivities <- function(scores, kinaseMapped,
 
   if (labelPoints){
     p <- p + ggrepel::geom_text_repel(data = b[CTRL_GENE_NAME %in% sigKinases & abs(sigScore) > 1.5,
-                                               .SD[which.max(abs(log2FC))], by = .(Label, CTRL_GENE_NAME)], size = 3 )
+                                               .SD[which.max(abs(log2FC))], by = .(Label, CTRL_GENE_NAME)], size = 2, min.segment.length = 0 )
   }
   
   

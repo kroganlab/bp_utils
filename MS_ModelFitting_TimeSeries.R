@@ -5,7 +5,9 @@
 #' start.times : which values of polyColumn to use for report deltas Yt - Y0
 #' powerRange : actually a set; so 1:5 and not c(1,5). Which powers in poly(x,power) to use in the model
 #' maxSelectedPower, minSelectedPower which values in powerRange are allowable as best_power
-#' 
+#' useAbsoluteLog2FC : boolean.  TRUE = the max Delta can be positive or negative. 
+#'                               FALSE = positive or smallest negative value. 
+#'                                       If FALSE, probably best to ignore any negative value returned. 
 #' Not currently used:
 #' pValueOverall the p value that the F test (model+polyColumn vs model) passes
 #' pValueIncrement in determining which power to select, p.F.Test (poly(polyColumn, power = i), poly (polyColumn, power = i-1) must be less than this
@@ -16,7 +18,7 @@ fitPoly.MultiplePowers <- function(data,
                                    polyColumn = "rank.time", otherTerms = c("SUBJECT"), yColumn = "LogIntensities",
                                    powerRange = 1:5, maxSelectedPower = 3, minSelectedPower = 1,
                                    pValueOverall = 0.01, pValueIncrement = 0.05,
-                                   start.times = c(0)){
+                                   start.times = c(0), useAbsoluteLog2FC = TRUE){
   # for debugging...
   #print (unique(data$Protein))
   
@@ -197,7 +199,7 @@ fitPoly.MultiplePowers <- function(data,
   # get predicted deltas from best lm
   bestLM <- lms[[match(bestPower, powerRange)]]
   dpt <- deltas.perTime.emm(data, bestLM, start.times, polyColumn)
-  maxDeltaList <- max.timeDelta(dpt, polyColumn)
+  maxDeltaList <- max.timeDelta(dpt, polyColumn, absolute = useAbsoluteLog2FC)
   meanPredictions <- dpt$meanPrediction
   names(meanPredictions) <- paste0 ("prediction.", dpt[[polyColumn]])
   meanActuals <- dpt$meanActual
@@ -266,12 +268,13 @@ actualMatrixFromPolyFits <- function(polyFits, rowID = "Protein", vsFirstTime = 
 nicePolyFits.fullTable <- function (protQuant, splitColumn = "Protein",
                                     polyColumn = "rankTime", otherTerms = "SUBJECT",
                                     yColumn = "LogIntensities", powerRange = 1:3,
-                                    minSelectedPower = 3){
+                                    minSelectedPower = 3, ...){
   proteinTables <- split(protQuant, protQuant[[splitColumn]])
   
   
   pf.out <-  pbapply::pblapply(proteinTables, fitPoly.MultiplePowers,
-                                   polyColumn = "rankTime", otherTerms = "SUBJECT", yColumn = "LogIntensities", powerRange = 1:3, minSelectedPower = 3)
+                                   polyColumn = polyColumn, otherTerms = otherTerms,
+                               yColumn = yColumn, powerRange = powerRange, minSelectedPower = minSelectedPower, ...)
   dt.out <- rbindlist(pf.out,idcol = "Protein", fill = TRUE, use.names = TRUE)
   nicePolyFitOutput(dt.out)
 }
@@ -280,12 +283,12 @@ nicePolyFits.fullTable <- function (protQuant, splitColumn = "Protein",
 
 #' take a matrix of non-log-transformed values (actual) and perform a time series fit on each 'receptor'
 #' optionally detrend the matrix using a matrix of predicted values. set predicted to 1 for no detrending
-#' columnInfo is a data table that translates the column names `column` to `receptor`, `time` and `rep`
+#' columnInfo is a data table that translates the column names `column` to `receptor`, `time` and `SUBJECT`
 #' If no columnInfo is passed, column names are assumed to be in format: receptor_time_rep, or HT2A_05_1
 #'    dots are also treated as separated, so HT2A_05.1 is valid
 #' rep will be treated as batches to include in the model
-
-detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
+#' ... arguments passed to fitPoly.MultiplePowers (via parLapply)
+detrendedPolyFits <- function(actual, predicted, columnInfo = NULL, ...){
   if (is.null(columnInfo)){
     columnInfo <- data.table(column = colnames(actual))[!grepl(spatialReferencePattern, column)]
     columnInfo[, c("receptor", "time", "rep") := tstrsplit (column, split = "[_.]", keep = c(1,2,3))]
@@ -304,11 +307,14 @@ detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
     predicted <- predicted[rownames(actual),]
   }
   detrended <- log2(actual/predicted)
+  detrended[is.infinite(detrended)] <- NA
   
   long <- melt (as.data.table(detrended, keep.rownames = TRUE), id.vars = "rn") 
   setnames(long, c("gene", "column", "detrendLog2Int"))
   long <- merge (long, columnInfo, by = "column")
   long[,orderedTime := as.integer(as.factor(time))]
+  
+  long <- long[!is.na(detrendLog2Int)] # remove the rows with NA
   
   # do the fitting, per receptor
   groups <- unique(long$receptor)
@@ -320,7 +326,9 @@ detrendedPolyFits <- function(actual, predicted, columnInfo = NULL){
     print (g)
     subTables <- split (long[ receptor == g], by = "gene")
     #geneFits <- lapply (subTables, fitPoly.MultiplePowers)
-    geneFits <- parLapply (cl, subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT"), yColumn = "detrendLog2Int")
+    geneFits <- parallel::parLapply (cl, subTables, fitPoly.MultiplePowers, 
+                                     polyColumn = "orderedTime", otherTerms = c("SUBJECT"), yColumn = "detrendLog2Int",
+                                     ...)
     #geneFits <- lapply (        subTables, fitPoly.MultiplePowers, polyColumn = "orderedTime", otherTerms = c("SUBJECT"), yColumn = "detrendLog2Int")
     fitScores <- rbindlist(geneFits, idcol = "Protein", fill = TRUE)
     allFits[[g]] <- fitScores

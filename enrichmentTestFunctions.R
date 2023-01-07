@@ -694,7 +694,7 @@ loadCORUMasGMT <- function (path = NULL, species = c("HUMAN", "MOUSE"), idType =
   # just hte columns desired
   subTable <- corumDT[, .SD, by = .(ComplexID, ComplexName), .SDcols = idColumn]
   # expand the genes/uniprots column
-  expanded <- subTable[, .(gene = unlist(strsplit(.SD[[idType]], ";"))), by = . (ComplexID, ComplexName) ]
+  expanded <- subTable[, .(gene = unlist(strsplit(.SD[[idType[1]]], ";"))), by = . (ComplexID, ComplexName) ]
   # reorder to expected term2gene format
   return(expanded[, .(ont = ComplexName, gene, ComplexID)])
 }
