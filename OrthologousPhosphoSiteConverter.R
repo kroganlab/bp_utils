@@ -1,13 +1,13 @@
 # original file by Mehdi: do_convert_phosphorthologs_v2.R which wraps up some of my (Ben) code
 
 # Load libraries  
+library(data.table)
 library(Biostrings)
 library(seqinr)
 library(parallel)
-library(tidyr)
 
 
-do_convert_phosphorthologs = function(array_from, fasta_from, fasta_to, tab_orthologs, gaps=c("-"), siteAA = c("S", "T", "Y")){
+do_convert_phosphorthologs = function(array_from, fasta_from, fasta_to, table_orthologs, gaps=c("-"), siteAA = c("S", "T", "Y")){
   # array_from
   # Array of UNIPROT_SITE of sites you would like to convert  
   
@@ -29,10 +29,10 @@ do_convert_phosphorthologs = function(array_from, fasta_from, fasta_to, tab_orth
   
   # Load fasta file
   message("LOADING FASTA FILES...")
-  fas_from = Biostrings::readAAStringSet(fasta_from)  # this one gives more sequence coverage of the monkey sequences, with an additional about 28 seqs
+  fas_from = Biostrings::readAAStringSet(fasta_from)   
   names(fas_from) = gsub("^(sp|tr)\\|(.*)\\|.*", "\\2", names(fas_from))
   
-  fas_to = Biostrings::readAAStringSet(fasta_to)  # this one gives more sequence coverage of the monkey sequences, with an additional about 28 seqs
+  fas_to = Biostrings::readAAStringSet(fasta_to)   
   names(fas_to) = gsub("^(sp|tr)\\|(.*)\\|.*", "\\2", names(fas_to))
   
   # Restrict table_ortholog to only consider proteins that you want converted now (to speed up algorithm)
@@ -67,7 +67,8 @@ do_convert_phosphorthologs = function(array_from, fasta_from, fasta_to, tab_orth
   
   # Make table that gets all sites of interest, annotates per position how it changes 
   message("CREATING FINAL OUTPUT TABLES...")
-  allSites = lapply (alignmentsGlobal, getAllPhosphoSites, siteAA = siteAA) %>% rbindlist(idcol = "pair")
+  allSites = rbindlist (lapply (alignmentsGlobal, getAllPhosphoSites, siteAA = siteAA),
+                        idcol = "pair")
   allSites[, c("pattern", "subject") := tstrsplit(pair, split="_")]
   allSites[,pair:=NULL]
   colnames(allSites) = gsub("pattern","From",colnames(allSites))
@@ -85,8 +86,6 @@ do_convert_phosphorthologs = function(array_from, fasta_from, fasta_to, tab_orth
   # Return
   message("ANALYSIS COMPLETE!")
   return(table_out)
-  
-  
 }
 
 
