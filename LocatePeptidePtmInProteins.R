@@ -118,7 +118,9 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
   return (result)
 }
 
-sitifyProteins_SpectronautFile <- function (specFile.dt, site = "PH", fastaFile = "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz"){
+sitifyProteins_SpectronautFile <- function (specFile.dt, 
+                                            site = "PH", 
+                                            fastaFile = "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz" ){
   stopifnot (site == "PH")  # nothing else supported yet, I think. Def not tested at least
   shortPTM = tolower(site)
   
@@ -261,7 +263,7 @@ fastaFileToTable <- function(filePath){
 }
 
 
-loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = TRUE){
+loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = FALSE){
   if (any(grepl(";", ids))){
     message ("Semicolons detected in uniprot IDs. These are likely multi-protein IDs and should be dealt with prior to looking them up in a file or online. These will be removed.")
     remove <- grep(";", ids, value = TRUE)
@@ -291,7 +293,7 @@ loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = TRUE){
 #' @param fastaFile string path to the fastaFile from which to lookup the sequences that match `uniprots`
 #' @param downloadFromWeb boolean
 #' @param proteinSiteSep  The string to put between the uniprot and site ID
-parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = "ph", fastaFile = NULL, downloadFromWeb = TRUE, proteinSiteSep = "_"){
+parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = "ph", fastaFile = NULL, downloadFromWeb = FALSE, proteinSiteSep = "_"){
   stopifnot (shortPTM == "ph")  # Only ph is currently supported, I think.
   mapper <- data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats)
   
