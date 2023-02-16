@@ -127,12 +127,24 @@ sitifyProteins_SpectronautFile <- function (specFile.dt, site = "PH", fastaFile 
   mapper[, parenLowerCaseFormat := convertSpectronautModificationFormat (specFormat)]
   # spectronaut will put _ before and after seqeunce.  I don't want those
   mapper[, parenLowerCaseFormat := gsub("^_|_$", "", parenLowerCaseFormat)]
-  mapper[, uniprotSite := parenLowerCaseToProteinSiteNames(ProteinName, 
-                                                           parenLowerCaseFormat, 
-                                                           shortPTM = shortPTM, 
-                                                           fastaFile = fastaFile)]
   
-  specFile.dt[mapper,
+  if (any(grepl(";", mapper$ProteinName))){
+    #expand to single, then convert, then collapse  
+    multiMapper <- mapper[, .(singleProtein = unlist(strsplit(ProteinName, ";"))), by = .(ProteinName, specFormat, parenLowerCaseFormat)]
+    multiMapper[, uniprotSite := parenLowerCaseToProteinSiteNames(singleProtein, 
+                                                                  parenLowerCaseFormat, 
+                                                                  shortPTM = shortPTM, 
+                                                                  fastaFile = fastaFile)]
+    mapper <- multiMapper[!is.na(uniprotSite), .( uniprotSite = paste0(uniprotSite, collapse = ";") ), by = .(ProteinName, specFormat, parenLowerCaseFormat)]
+    
+  } else{
+    mapper[, uniprotSite := parenLowerCaseToProteinSiteNames(ProteinName, 
+                                                             parenLowerCaseFormat, 
+                                                             shortPTM = shortPTM, 
+                                                             fastaFile = fastaFile)]
+  }
+  
+  specFile.dt[mapper ,
               c("ProteinName",   "parenLowerCaseFormat", "oldProteinName") :=
               .(i.uniprotSite,  i.parenLowerCaseFormat,     ProteinName),
               on = c("ProteinName", PeptideSequence = "specFormat")]
