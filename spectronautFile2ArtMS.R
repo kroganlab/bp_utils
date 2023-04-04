@@ -118,14 +118,16 @@ doSiteConversion <- function(artmsInput, referenceProteome,site="PH", label_unmo
   # config.yaml becomes config.site.yaml
   
   # set new paths and confirm that they are new (confirm that gsub found something to work on)
-  newEvidence <- gsub (".txt$", paste0(".",site,".txt"), artmsInput$config_data$files$evidence)
+  pathFriendlySite <- gsub(":", "-",site)
+  
+  newEvidence <- gsub (".txt$", paste0(".",pathFriendlySite,".txt"), artmsInput$config_data$files$evidence)
   stopifnot (newEvidence != artmsInput$config_data$files$evidence)
   if (is.null(newEvidence) | length(newEvidence) == 0){
-    newEvidence <- sprintf ("evidence.%s.txt", site)
+    newEvidence <- sprintf ("evidence.%s.txt", pathFriendlySite)
     message ("New evidence will be written to ", newEvidence)
   }
   
-  newConfigFile <- gsub (".yaml$", paste0(".", site, ".yaml"), artmsInput$config_file)
+  newConfigFile <- gsub (".yaml$", paste0(".", pathFriendlySite, ".yaml"), artmsInput$config_file)
   stopifnot (newConfigFile != artmsInput$config_file)
   
   #for UB and PH, artMS will filter based on Modification column
@@ -178,7 +180,11 @@ setModificationsColumns <- function (dt, site){
     } else if (s=="UB"){
       #stop ("setModificationsColumns, I still need to check how spectronaut identifies ubiquitination")
       dt[grep ("\\(gl\\)", `Modified.sequence`),Modifications := paste (Modifications, "x GlyGly")]
-    } else stop ("setModificationsColumns, unknown site requested: ", site)
+    } else if (grepl(":", s)){
+      modFormat <- strsplit(s, ":")[[1]][3]
+      re <- paste0("\\(", modFormat, "\\)")
+      dt[grep (re, `Modified.sequence`),Modifications := paste (Modifications, "x ", modFormat)]
+    }else stop ("setModificationsColumns, unknown site requested: ", site)
   }
   invisible(dt)
 }
