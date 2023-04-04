@@ -325,11 +325,20 @@ heatmapNumbered <- function (main.mat, counts.mat, negCols = NULL, title="",
 
 
 library (ComplexHeatmap)
-enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, groupColumn="bait", topN = 1, title="", cols = NULL, 
+enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable = NULL, fullEnrichTable = NULL,
+                                      pipeLineList = NULL,
+                                      groupColumn= NULL, topN = 1, title="", cols = NULL, 
                                       negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
                                       annotatePossibleMatches = TRUE,  row_names_gp = gpar(fontsize = 10),
                                       upperThreshold  = NULL,
                                       pvalColumn = "p.adjust", ...){
+  if (!is.null(pipeLineList)){
+    if(is.null(simplifiedEnrichTable)) simplifiedEnrichTable <- pipeLineList$simp[[1]]
+    if(is.null(fullEnrichTable)) fullEnrichTable <- pipeLineList$simp[[2]]
+  }
+  if (is.null(groupColumn)) groupColumn <- colnames(simplifiedEnrichTable)[[1]]
+    
+  
   setorderv(simplifiedEnrichTable, cols = pvalColumn)
   bestTermPerBait <- simplifiedEnrichTable[simplifiedEnrichTable[[pvalColumn]]<max_pAdjust & Count >= minCount,.(ID=ID[1:topN]),by=groupColumn]
 
@@ -421,10 +430,16 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable, fullEnrichTable, gr
 enrichmentOnGroupsPL <- function (groupTable, geneColumn, groupColumns, gmt,universe = NULL, numProcessors = 1,
                                   max_pAdjust = 0.1, broadest = FALSE,
                                   topN = 4, reduceRedundantsAcrossGroups = TRUE,
+                                  enricherArgs = list(),
                                   ...){
   
   
-  enrich.dt  <- enricherOnGroups(groupTable, geneColumn, groupColumns, gmt, universe, numProcessors)
+  enricherArgs <- c(list(groupTable, geneColumn, groupColumns, gmt, universe, numProcessors),
+                    enricherArgs)
+  enrich.dt <- do.call (enricherOnGroups, enricherArgs)
+  
+  #enrich.dt  <- enricherOnGroups(groupTable, geneColumn, groupColumns, gmt, universe, numProcessors)
+  
   groupColumn <- paste(groupColumns, collapse = ".")
   simp <- simplifyEnrichBySimilarUniverseMembership(enrich.dt, gmt, groupColumn,
                                                     cutHeight = 0.99, broadest = FALSE,

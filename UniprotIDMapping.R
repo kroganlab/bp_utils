@@ -421,6 +421,7 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
 }
 
 translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", fillMissing = FALSE, useDatFile = FALSE) {
+  
   if (useDatFile != FALSE){
     if (something != "SYMBOL"){
       stop("Currently only know how to use dat file for gene `SYMBOL`")
@@ -434,18 +435,32 @@ translateUniprot2Something <- function (uniprots, something = "SYMBOL", species 
     return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
   }
   
+  uniprotsNoNA <- uniprots[!is.na(uniprots)]
   
   # do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
   
   if (species == "HUMAN"){
-    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
   }else if (species == "MOUSE"){
-    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
   }else if (species == "RAT"){
-    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprots), something, 'UNIPROT', multiVals == "first")
+    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
   } else {
     stop("unrecognized species", species)
   }
+  
+  # a change in AnnotationDbi::mapIds (updated Feb 2023) makes it return a list, even when multiVals = "first"
+  # not due to a change in AnnodationDbi::mapIds.  
+  # Some weird behavior with sapply (which I use here and also AnnotationDbi uses), not returning a vector when expected.
+  # solved: it happens when there is a NULL in the list.  sapply(list("a", NULL), identity) does not return a vector
+  # the NULL happens when any of uniprots above is NA.  Should be fixed, lets see...
+
+  if ("list" %in% class(geneNames)){
+    message ("debugMessage: list returned by AnnotationDbi::mapIds")
+    geneNames <- unlist(sapply(geneNames, function(x)x[[1]]))
+  }
+  
+  
   mapTable <- unique(data.table(uniprot = names(geneNames), gene = geneNames))
   setkey(mapTable, "uniprot")
   # this orders all and expands the missing cases

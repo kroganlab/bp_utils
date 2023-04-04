@@ -50,7 +50,7 @@ ScriptAndDatedFileName <- function(x, scriptName = NULL){
   dir <- ScriptNamedDir(scriptName)
   fileName <- DateFileName(x)
   path <- file.path(dir, fileName)
-  print (path)
+  cat (path, "\n")
   return (path)
 }
 
@@ -58,11 +58,11 @@ ScriptAndDatedFileName <- function(x, scriptName = NULL){
 #'  for the matching file name with the latest (most recent) matching name
 #' @param x character file name
 #' 
-GetLatestScriptFile <- function(x, scriptName=NULL){
+GetLatestScriptFile <- function(x, scriptName=NULL, include.dirs = FALSE){
   stopifnot (length(x) == 1)
   dir <- ScriptNamedDir(scriptName)
   filePattern <- paste0("^\\d{4}_\\d{2}_\\d{2}_", x, "$", collapse = "")
-  filesFound <- list.files(dir, filePattern)
+  filesFound <- list.files(dir, filePattern, include.dirs = include.dirs)
   stopifnot (length(filesFound) > 0)
   if (length(filesFound) > 1){
     message ("Multiple files  with matching names found.  Using the last one")
@@ -95,7 +95,7 @@ BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL){
   if (is.null(dimensions))
     dimensions <- dev.size(units = "in")
   
-  print (sprintf("Writing image to  %s", path))
+  cat (sprintf("Writing image to:  \n%s\n", path))
   cairo_pdf(path, width = dimensions[1], height = dimensions[2])
   
   # handle functions, my enrichment heatmaps that are part of a list
