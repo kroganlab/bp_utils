@@ -256,9 +256,19 @@ fastaFileToTable <- function(filePath){
                              as.string = TRUE, set.attributes = FALSE)
   dt <- data.table (header = names(seqs), sequence = unlist(seqs))
   # expect uniprot format 'sp|Q13245|protein name'
-  dt[grepl ("\\|", header), c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|", keep = 1:3)]
+  if (any(grepl("\\|", dt$header))){
+    dt[grepl ("\\|", header), c("db", "uniprot", "uniprotName") := tstrsplit(header, split = "\\|")[1:3]]
+  }
   # if no pipes then we use the whole header as the uniprot identifier
-  dt[!grepl("\\|", header),  uniprot := header] 
+  dt[!grepl("\\|", header),  uniprot := header]
+  
+  # check if any ";" in protein names.  If so we warn and expand the table
+  if (any(grepl(";", dt$uniprot))){
+    warning ("Semicolons detected in protein names.  This will cause havoc with protein groups from MS results.  Treating these as different names for duplicate sequences, and expanding the fasta database with singly-named duplicate sequences.")
+    dt <- dt[, .(header, sequence, singleUniprot = unlist(strsplit(uniprot, ";"))), by = uniprot]
+    dt[, uniprot := singleUniprot]
+    dt[, singleUniprot := NULL]
+  }
   return (dt[])
 }
 
