@@ -318,7 +318,7 @@ parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, sh
   mapper <- data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats)
   
   # remove all but 1 type of PTM
-  allButMyPTM.regex  <- sprintf("\\((?!%s)[a-z]*\\)", shortPTM) 
+  allButMyPTM.regex  <- sprintf("\\((?!%s\\b)[a-z]*\\)", shortPTM) #\b word boundary to neg lookahead to prevent matching trailing kmet i's
   mapper[, only1PTM := gsub ( allButMyPTM.regex, "",parenLowerCaseFormat, perl = TRUE)]
 
   
