@@ -17,6 +17,7 @@ emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue){  # ho
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
 #' @param emmeansFormula  a formula (or other object) passed as second argument to emmeans. It is expected to be
 #'                        used int he context of contrasts so it must produce a $contrasts field in the output
+#'                        examples: emmeansFormula = pairwise~GROUP_ORIGINAL or emmeansFormula = trt.vs.ctrl~GROUP_ORIGINAL
 #' @param postProcessFunction  a function that receives an lm and returns a data.table. See emmeans.contrastOfContrasts for an example 
 
 linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,
@@ -34,6 +35,9 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   # get all coef in a single table
   coefs.list <- lapply(coef.anova.list, `[[`, "coef")
   coefTable <- rbindlist(coefs.list, idcol = splitColumn, fill = TRUE)
+  
+  residuals.list <- lapply(coef.anova.list, `[[`, "residuals")
+  residualsTable <- rbindlist(residuals.list, idcol = splitColumn,  fill = TRUE)
   
   # get all contrast in a single table, if any
   if (!is.null(emmeansFormula)){
@@ -67,7 +71,7 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   errWarnTable[err == "NULL", err := NA]
   errWarnTable[warn == "NULL", warn := NA]
   
-  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list, postProcess = postProcessTable))
+  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list, postProcess = postProcessTable, residuals = residualsTable))
 } 
 
 
@@ -99,6 +103,11 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
                                               `Pr(>F)`< 0.05  ~ "*",
                                               `Pr(>F)`< 0.1  ~ ".",
                                               TRUE ~ "")]
+    
+    # residuals
+    residuals.list <- lapply(lms, function(l)cbind(l$model, data.table(residuals = residuals(l), fitted = fitted(l))))
+    residuals.dt <- rbindlist(residuals.list, idcol = "model")
+    
     # get all contrasts from emmeans
     if (!is.null(emmeansFormula)){
       contrasts.list <- lapply(lms, function(l)as.data.table(emmeans::emmeans(l, emmeansFormula)$contrasts))
@@ -130,9 +139,9 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
     
   } else{
     # 'initialize' the return values 
-    anovaTables <- coef.table <- contrastTable <- postProcess <-  NULL
+    anovaTables <- coef.table <- contrastTable <- postProcess <- residuals.dt <-  NULL
   }
-  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable, contrast = contrastTable, lms = lms, postProcess = postProcess))
+  return (list (anova = anovaTables, coef = coef.table, errWarn = errorWarnTable, contrast = contrastTable, lms = lms, postProcess = postProcess, residuals = residuals.dt))
 }
 
 
@@ -189,3 +198,32 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   fwrite (res$coef,  "All_lm_coef_results.csv")
   
 }
+
+
+#' useful when there is a SUBJECT effect in MSstats protein quantities and you want to remove that from the scatter plot
+#' @param protQuant a data.table that is the proteinLevelData from MSstats::dataProcess
+#' @param formula leave it at default
+#' @param splitColumn character, probably either "Protein" or "gene"
+#' @param cl an integer (or other valid cl argument to pblapply) specifying number of processes to use, default NULL = no subprocesses
+groupEmmeansAndResiduals <- function(protQuant, formula = LogIntensities ~ GROUP + SUBJECT, splitColumn = "gene", cl = NULL){
+  
+  .groupEMMeans <- function (l){
+    as.data.table(emmeans::emmeans(l, c("GROUP" )))
+  }
+  
+  # in case 
+  protQuant[, SUBJECT := as.character(SUBJECT)]
+  
+  lm.out <- linearModelsAllProteins(protQuant, formulaList = list(base = formula), splitColumn = splitColumn,
+                                    emmeansFormula = trt.vs.ctrl~GROUP, returnLMs = TRUE,
+                                    postProcessFunction = .groupEMMeans, cl = cl)
+  
+  groupResiduals <- merge ( lm.out$postProcess, lm.out$residuals, by = c(splitColumn, "GROUP", "model"))
+  groupResiduals[, groupResidual := emmean + residuals]
+  setnames(groupResiduals, "emmean", "groupMean")
+  
+  return (groupResiduals)
+}
+
+
+
