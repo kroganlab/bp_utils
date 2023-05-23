@@ -119,10 +119,10 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
 }
 
 sitifyProteins_SpectronautFile <- function (specFile.dt, 
-                                            site = "PH", 
+                                            site = c("PH", "KAC", "KMETI", "KMETII", "KMETII"), #addd options for other ptms
                                             fastaFile = "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz" ){
-  stopifnot (site == "PH")  # nothing else supported yet, I think. Def not tested at least
-  shortPTM = tolower(site)
+  stopifnot(site %in% c("PH", "KAC", "KMETI", "KMETII", "KMETIII"))  
+  shortPTM = tolower(site) #throwing errors in parenLowerCaseToProteinSiteNames if numeric chars included
   
   
   mapper <- unique(specFile.dt[,.(ProteinName, specFormat = PeptideSequence)])
@@ -161,21 +161,31 @@ sitifyProteins_SpectronautFile <- function (specFile.dt,
 
 
 
-convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "MOX", "NAC"), keepOnly = NULL, removeAll = FALSE){
+convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "DEA", "MOX", "NAC", 'KAC', 'KMETI', 'KMETII', 'KMETIII'), keepOnly = NULL, removeAll = FALSE){
   result <- specModSequence
   # these are overly complicated because they match both S[Phospho (STY)] and S(Phospho (STY))
   specFormats <- list (PH='([STY])[[(]Phospho \\(STY\\)[])]',
                        UB='(K)[[(]GlyGly \\(K\\)[])]',
+                       DEA  ='([NQ])[[(]Deamidation \\(NQ\\)[])]',
                        CAM = '([C])[[(]Carbamidomethyl \\(C\\)[])]',
                        MOX = '([M])[[(]Oxidation \\(M\\)[])]',
                        NAC =  '([A-Z_])[[(]Acetyl \\(Protein N-term\\)[])]',
+                       KAC = '(K)[[(]Acetyl \\(K\\)[])]',
+                       KMETI= '(K)[[(]Methyl \\(K\\)[])]',
+                       KMETII= '(K)[[(]Dimethyl \\(K\\)[])]',
+                       KMETIII= '(K)[[(]Trimethyl \\(K\\)[])]',
                        ANY =          '[[(][^][)(]*\\([^][)(]*\\)[])]' )  # suggest regex101.com to parse this visually, paste and then change \\
 
   artmsFormats <- list (PH='\\1\\(ph\\)',
                         UB='\\1\\(gl\\)',
+                        DEA='\\1\\(dea\\)',
                         CAM = '\\1\\(cam\\)',
                         MOX = '\\1\\(ox\\)',
                         NAC = '\\1\\(ac\\)',
+                        KAC = '\\1\\(kac\\)',
+                        KMETI = '\\1\\(kmeti\\)',
+                        KMETII = '\\1\\(kmetii\\)',
+                        KMETIII = '\\1\\(kmetiii\\)',
                         ANY = '')  # for removal purposes
 
   stopifnot(names(specFormats)==names(artmsFormats))
@@ -303,12 +313,12 @@ loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = FALSE){
 #' @param fastaFile string path to the fastaFile from which to lookup the sequences that match `uniprots`
 #' @param downloadFromWeb boolean
 #' @param proteinSiteSep  The string to put between the uniprot and site ID
-parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = "ph", fastaFile = NULL, downloadFromWeb = FALSE, proteinSiteSep = "_"){
-  stopifnot (shortPTM == "ph")  # Only ph is currently supported, I think.
+parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = c("ph", "kac", "kmeti", "kmetii", "kmetiii"), fastaFile = NULL, downloadFromWeb = FALSE, proteinSiteSep = "_"){
+  stopifnot(shortPTM %in% c("ph","kac","kmeti", "kmetii", "kmetiii"))
   mapper <- data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats)
   
   # remove all but 1 type of PTM
-  allButMyPTM.regex  <- sprintf("\\((?!%s)[a-z]*\\)", shortPTM) 
+  allButMyPTM.regex  <- sprintf("\\((?!%s\\b)[a-z]*\\)", shortPTM) #\b word boundary to neg lookahead to prevent matching trailing kmet i's
   mapper[, only1PTM := gsub ( allButMyPTM.regex, "",parenLowerCaseFormat, perl = TRUE)]
 
   
