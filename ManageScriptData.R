@@ -90,7 +90,7 @@ PDFBackupFileName <- function(prefix = "", subDir = ""){
   return (path)
 }
 
-BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL){
+BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL, openAfter = FALSE){
   path <- PDFBackupFileName(prefix, subDir)
   if (is.null(dimensions))
     dimensions <- dev.size(units = "in")
@@ -110,6 +110,11 @@ BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL){
   print (g)
   
   dev.off()
+  
+  if (openAfter)
+    # will only work on mac
+    system(sprintf ("open %s", path), wait = FALSE)
+  
   return (graphics)
 }
 
