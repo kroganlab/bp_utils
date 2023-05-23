@@ -1,0 +1,258 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+This template file located at:
+/Applications/RStudio.app/Contents/Resources/resources/templates/notebook_osx.Rmd
+
+```{r}
+library (data.table)
+library (ComplexHeatmap)
+library (ggplot2)
+rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90,vjust = 0.5, hjust=1))
+
+source("../../bp_utils/ManageScriptData.R")
+WriteSessionInfo()
+WriteInstalledPackages()
+```
+
+# path to results.txt file, MSstats GroupComparison output
+```{r}
+results.txt <- "/Users/ben/Box/Project_Coronavirus/00_data/proteomics/Level2/UK4_PH_results_v2.txt"
+species <- "HUMAN"  # or "MOUSE"
+
+githubKroganLab <- "../../"
+source(file.path(githubKroganLab,  "bp_utils" ,"KinaseActivityScores.R"))
+
+
+
+filterResults <- function(x){
+  return(x)
+}
+
+
+filterResults <- function(results){
+  return (results[grepl( "(VIC|IC19)_(.+)-Mock_\\2", Label), ])
+}  
+
+```
+
+
+
+# Volcanoes
+
+
+```{r, fig.width=5, fig.height=4}
+results <- filterResults (fread (results.txt))
+
+pvalueThreshold <- 0.05
+log2FCThreshold <- 1
+pvalueVariable <-  "adj.pvalue" # or "pvalue"
+
+
+results[,sig := "not"]
+results[results[[pvalueVariable]] < pvalueThreshold & abs(log2FC) > log2FCThreshold, sig := ifelse(log2FC  <0, "down", "up")]
+results[, yVariable := -log10(results[[pvalueVariable]])]
+
+p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) + 
+  geom_point(show.legend = FALSE, alpha = 0.5, size = 1, shape = 16) + 
+  facet_wrap (~Label) + 
+  scale_color_manual(values = c(down= "blue", not = "gray", up = "red")) +
+  #scale_x_continuous(limits = c(-4,4)) +
+  scale_y_continuous(name = paste(pvalueVariable, "(-log10)", collapse = "")) +
+  geom_hline(yintercept = -log10(pvalueThreshold), lty="dotted") +
+  geom_vline(xintercept = c(-1, 1) * log2FCThreshold, lty="dotted") + 
+  theme_bw() 
+
+
+BackupAsPDF (p, "Volcanos_")
+
+
+results[,c("posGroup", "negGroup") := tstrsplit(Label, split = "-")]
+
+p <- ggplot (results, aes(x=log2FC, y = yVariable, color = sig)) + 
+  geom_point(show.legend = FALSE, alpha = 0.5, size = 1, shape = 16) + 
+  facet_grid(rows=vars(posGroup), cols = vars(negGroup)) + 
+  scale_color_manual(values = c(down= "blue", not = "gray", up = "red")) +
+  #scale_x_continuous(limits = c(-4,4)) +
+  scale_y_continuous(name = paste(pvalueVariable, "(-log10)", collapse = "")) +
+  geom_hline(yintercept = -log10(pvalueThreshold), lty="dotted") +
+  geom_vline(xintercept = c(-1, 1) * log2FCThreshold, lty="dotted") + 
+  theme_bw() 
+
+
+BackupAsPDF (p, "Volcanos_grid_")
+
+
+```
+
+## barcharts
+
+```{r}
+#results[, sig := factor(sig, levels= c("up", "not", "down"))]
+summaryData <- results[, .(count = length(unique(Protein))), by = .(Label, sig) ]
+summaryData[, sig := factor(sig, levels= c("up", "not", "down"))]
+setorder(summaryData, Label, -sig)
+summaryData[, textY := cumsum(count), by = Label]
+summaryData[, textY := textY - count/2] # move down to center of bar part
+p <- ggplot(summaryData, aes (x = Label, fill = sig, y = count, label = count))  +
+  scale_fill_manual(values = c(down= "blue", not = "gray", up = "red")) +
+  geom_col() +
+  geom_label(aes(y = textY), color = "white")  +
+  theme_bw()
+
+BackupAsPDF(p, "BarChart_CountSigPeptideGroups_")
+```
+
+
+# Kinase analysis
+
+```{r}
+kinaseData <- loadKinaseDataOmniPath(species = species)
+
+
+#load MSstats results data
+#results.txt <- file.path(paste0(outFilePrefix, "_output", collapse=""), "results.txt")
+results <- filterResults(fread (results.txt)) 
+
+# convert to single site info based on gene names
+source(file.path(githubKroganLab,  "bp_utils" ,"UniprotIDMapping.R"))
+results[,gene := multiUniprotSites2multiGeneSites(Protein)]
+singleSiteResults <- prepare_AMSS_ResultsFile(results, column = "gene")
+
+labels <- unique(singleSiteResults$Label)
+#kinAct <- kinaseActivity (expanded2SingleSites[Label == labels[4]])
+
+kinActList <- lapply (labels, FUN=function(lab){kinaseActivity(singleSiteResults[Label == lab & representative==TRUE],
+                                                               plots = FALSE,
+                                                               kinaseData = kinaseData)})
+names(kinActList) <- labels
+
+kinActFull.scores <- rbindlist(lapply(kinActList, FUN = function(x)x$scores), idcol="Label")
+kinActFull.mapped <- rbindlist(lapply(kinActList, FUN = function(x)x$kinaseMapped)) # Label is already in these tables
+
+kinaseSummaryScores.csv <- ScriptAndDatedFileName("kinaseSummaryScores.csv")
+kinaseSubstrateData.csv <- ScriptAndDatedFileName("kinaseSubstrateData.csv")
+message (sprintf("Writing kinase output files to\n\t%s\n\t%s", kinaseSummaryScores.csv, kinaseSubstrateData.csv))
+
+fwrite (kinActFull.scores, kinaseSummaryScores.csv)
+fwrite (kinActFull.mapped, kinaseSubstrateData.csv)
+
+```
+
+## Heatmap of significant kinases
+```{r, fig.width = 4, fig.height= 5}
+sigKinases <-  kinActFull.scores[fdr.BH < 0.05 & N >= 2, unique(CTRL_GENE_NAME)]
+
+sigKinase.mat.z <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "Z"),
+                              rownames = "CTRL_GENE_NAME")
+
+sigKinase.mat.N <- as.matrix(dcast (kinActFull.scores[CTRL_GENE_NAME %in% sigKinases], CTRL_GENE_NAME~Label, value.var = "N"),
+                                  rownames = "CTRL_GENE_NAME")
+
+
+hm <- Heatmap (sigKinase.mat.z, 
+         cluster_columns=TRUE, 
+         name = "Kinase Z Score",
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="[-_.]")[[1]],
+         col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
+         cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(sigKinase.mat.N[i,j])){
+                                    grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                })
+
+BackupAsPDF(hm, prefix = "Heatmap_SigKinases")
+
+hm <- Heatmap (sigKinase.mat.z, 
+         cluster_columns=FALSE, 
+         name = "Kinase Z Score",
+         column_split = tstrsplit(colnames(sigKinase.mat.z), split="[-_.]")[[1]],
+         col = circlize::colorRamp2(breaks = c(-3, 0, 0, 3), colors = c("blue", "gray", "gray", "red")),  # two midpoints in case you want to have a wider gray bar around 0
+         cell_fun = function(j, i, x, y, width, height, fill) {
+                                  if (!is.na(sigKinase.mat.N[i,j])){
+                                    grid.text(sprintf("%.0f", sigKinase.mat.N[i, j]), x, y, gp = gpar(fontsize=10, col="white"))
+                                  }
+                                })
+
+BackupAsPDF(hm, prefix = "Heatmap_SigKinases_noColCluster")
+
+
+```
+
+
+## plots of individual kinase substrates
+
+
+```{r, fig.width=6 fig.height=6}
+p <- BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases)
+BackupAsPDF(p, "SigKinaseSites_BoxPlots_ByLabel_")
+
+p <- BarplotKinaseActivities(kinActFull.scores, kinActFull.mapped, sigKinases = sigKinases, reverse=TRUE)
+BackupAsPDF(p, "SigKinaseSites_BoxPlots_ByKinase_")
+
+```
+
+# Enrichment analysis
+## Prepare sets of proteins from our data
+```{R}
+results <- filterResults(fread (results.txt))
+
+pvalueThreshold <- 0.05
+log2FCThreshold <- 1
+pvalueVariable <-  "adj.pvalue" # or "pvalue"
+
+
+results[,sig := "not"]
+results[results[[pvalueVariable]] < pvalueThreshold & abs(log2FC) > log2FCThreshold, sig := ifelse(log2FC  <0, "down", "up")]
+
+# multiproteins will be excluded from enrichment by the enrichment process itself 
+# because (e.g.) the string "A0A0B4J2F2;P57059" does not match any uniprot exactly (likewise for genes)
+results[, uniprot := strsplit(gsub( "_[STY][0-9]+(;|$)", "\\1",  Protein),";") |>
+          lapply(FUN = unique) |>
+          sapply(FUN = paste, collapse = ";")]
+
+
+universe <- results$uniprot |> unique()
+
+```
+
+
+## load gene ontology data
+```{R}
+source (file.path(githubKroganLab, "bp_utils", "enrichmentTestFunctions.R"))
+
+gmt <- loadGmtFromBioconductor(dbName = "org.Hs.eg.db", ontology = "ALL", keyType = "UNIPROT")
+
+```
+
+```{r}
+enpl.out <- enrichmentOnGroupsPL(groupTable = results[sig!="not"], geneColumn = "uniprot", groupColumns = c("Label", "sig"), gmt = gmt, universe = universe)
+```
+
+
+
+
+## plot
+```{r, fig.height=4, fig.width=5}
+
+a <- enrichHeatmapBestPerGroup(enpl.out$simp[[1]], enpl.out$simp[[2]],
+                          #cols = sort(c(negCols, posCols)),
+                          negCols = grep ("down", unique(enpl.out$simp[[1]]$Label.sig), value = TRUE),
+                          groupColumn = "Label.sig",
+                          topN = 8,
+                          cluster_columns=FALSE, 
+                          reduceRedundantsAcrossGroups=TRUE,
+                          minCount = 1,
+                          max_pAdjust = 0.05)
+
+# to draw results to a file; you will want to play with height and width to get reasonably shaped plot
+# cairo_pdf("My_enrichment_heatmap_file.pdf", height=6, width=8)  # or replace cairo_pdf with pdf if you don't have cairo installed
+# draw (a$hmList)
+# dev.off()
+
+
+BackupAsPDF(a, "PH_Protein_enrichments")
+```
+
+
