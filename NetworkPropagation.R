@@ -12,36 +12,142 @@ LoadNumPyS_matrix <- function (matrixPath, nodesTablePath){
   return(S_matrix)
 }
 
+# this is very slow with real-sized networks
+#' @param networkG An igraph graph object. Should be non-directed
+#' @param pr probability of restart. Should be between 0 and 1. Lower numbers indicate more heat dispersion.
+#'           value of 1 is no propagation, start heat only; and near 0 is no influence of start heat pattern.
+S_matrix_R <- function(networkG, pr, removeRestartHeat = FALSE){
+    # largest connected component
+    g <- decompose(networkG, max.comps = 1)[[1]]
+    if (length(g) != length(networkG))
+      message ("Distinct components in network, only using largest")
+      
+    A <- as.matrix(as.matrix(g))
+    # make sure we have a non-directed, symetrical graph
+    stopifnot(all(A == t(A)))
+
+    D = diag(degree(g))
+    
+    W = A %*% solve(D)
+    I = diag (nrow(A))
+    S_matrix = pr * solve(I-(1-pr)*W)
+    
+    if (removeRestartHeat){
+      diag(S_matrix) <- diag(S_matrix) - pr
+      # rescale columns so the sum to 1
+      S_matrix <- sweep ( S_matrix, 2, colSums(S_matrix), "/")
+    }
+    
+    colnames(S_matrix) <- rownames(S_matrix) <- V(g)
+    
+    return (S_matrix)
+  }
+
+
+
+
+# this is very slow with real-sized networks
+# slightly idfferent math is used (negatives in different places).  See https://journals.plos.org/ploscompbiol/article?id=10.1371/journal.pcbi.1009161
+# but this is just the transposte of hte normal S_matrix. I don't think this "row normalization" at hte expense of column normalization makes any sense
+# Theoretically, input heat from a hub node is now more heatful than a different node. So permutations will favor an initial dataset with more hubs
+#' @param networkG An igraph graph object. Should be non-directed
+#' @param pr probability of restart. Should be between 0 and 1. Lower numbers indicate more heat dispersion.
+#'           value of 1 is no propagation, start heat only; and near 0 is no influence of start heat pattern.
+#'           
+S_matrix_R.rowNormalized <- function(networkG, pr, removeRestartHeat = FALSE){
+  # largest connected component
+  g <- decompose(networkG, max.comps = 1)[[1]]
+  if (length(g) != length(networkG))
+    message ("Distinct components in network, only using largest")
+  
+  A <- as.matrix(as.matrix(g))
+  # make sure we have a non-directed, symetrical graph
+  stopifnot(all(A == t(A)))
+  
+  D = diag(degree(g))
+  
+
+  W = -(solve(D)) %*% A
+  
+  I = diag (nrow(A))
+  
+  alpha = 1-pr
+  
+  S_matrix = (1-alpha) * solve(I  + alpha*W)
+    
+  # iddentical to the above, but notice the negative sign on this W compared with S_matrix_R
+  # S_matrix2 = pr * solve(I-(1-pr)*(-W))
+  
+  if (removeRestartHeat){
+    diag(S_matrix) <- diag(S_matrix) - pr
+    # rescale columns so the sum to 1
+    S_matrix <- sweep ( S_matrix, 2, colSums(S_matrix), "/")
+  }
+  
+  colnames(S_matrix) <- rownames(S_matrix) <- V(g)
+  
+  return (S_matrix)
+}
+
+
+
+
+
+# this is very slow with real-sized networks
+# see the python version in StringSMatrix.HeatDiffuse.py for example of a faster python implementation
+#' @param networkG An igraph graph object. Should be non-directed
+#' @param pr probability of restart. Should be between 0 and 1. Lower numbers indicate more heat dispersion.
+#'           value of 1 is no propagation, start heat only; and near 0 is no influence of start heat pattern.
+S_matrix_R.diffusion <- function(networkG, time, removeRestartHeat = FALSE){
+  # largest connected component
+  g <- decompose(networkG, max.comps = 1)[[1]]
+  if (length(g) != length(networkG))
+    message ("Distinct components in network, only using largest")
+  
+  A <- as.matrix(as.matrix(g))
+  # make sure we have a non-directed, symetrical graph
+  stopifnot(all(A == t(A)))
+  
+  D = diag(degree(g))
+  
+  # laplacian
+  W = D-A
+  
+  # normalized laplacian
+  #W = igraph::graph.laplacian(g, normalized= TRUE, sparse = FALSE)
+  # same ( to rounding errors) as: 
+  #W =  expm::sqrtm(solve(D)) %*% (D-A) %*% expm::sqrtm(solve(D))
+
+  S_matrix <- expm::expm(-W*time )
+  
+
+  if (removeRestartHeat){
+    # over simple for now, maybe
+    diag(S_matrix) <- 0
+    # rescale columns so the sum to 1
+    S_matrix <- sweep ( S_matrix, 2, colSums(S_matrix), "/")
+  }
+  
+  colnames(S_matrix) <- rownames(S_matrix) <- V(g)
+  
+  return (S_matrix)
+}
+
+
 
 
 # idea here is to propagate two or more datasets at a time.  
 # Heat is the product of each heat propagated individually.
+# or sum of log2(heats)
 #
 # Theory is that this will best identify the "linker" genes between two datasets
 #' @param geneHeatsList list (ab = ab.geneHeats, ppi = ppi.geneHeats), for example
 #' each ab.geneHeats etc is a data.table with columns `gene` and `heat`
-NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPermutations = 20000, networkHeatOnly = TRUE, 
+NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPermutations = 20000, networkHeatOnly = FALSE, 
                                                  permuteOnlyInObserved=TRUE, calculateContributions = FALSE, genesInContributionsTable = NULL){
   message (now(), " Checking S matrix")
   stopifnot(check_s_matrix(S_matrix))
   
-  message (now(), " Rescaling input heat to size of S_matrix (expected heat per gene = 1.0)")
-  # lapply for its data.table side effects by :=
-  lapply(geneHeatsList, function(geneHeats)
-    geneHeats[, heat := nrow(S_matrix) * heat/sum(heat, na.rm=TRUE)])
-  
-  # expected heat outs is row sums of S_matrix. Assumes all input genes are equally likely to have heat.
-  # expectedHeatOut <- rowSums(S_matrix)
-  # if (networkHeatOnly){
-  #   expectedHeatOut <- expectedHeatOut - diag(S_matrix)
-  # }
-  # 
-  
-  # expected Heat will vary based on coverage of dataset, calculate per dataset:
-  expectedHeatOut <- sapply(geneHeatsList, calculateExpectedHeat, S_matrix, permuteOnlyInObserved, networkHeatOnly)
-  
-
-
   # check that all heats are in network
   for (heatName in names(geneHeatsList)){
     # rescale input heat to size of S_matrix, thus expected heat per gene is 1.0
@@ -67,7 +173,22 @@ NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPerm
     }
   }
   
+  message (now(), " Rescaling input heat to size of S_matrix (expected heat per gene = 1.0)")
+  # lapply for its data.table side effects by :=
+  lapply(geneHeatsList, function(geneHeats)
+    geneHeats[, heat := nrow(S_matrix) * heat/sum(heat, na.rm=TRUE)])
   
+  # expected heat outs is row sums of S_matrix. Assumes all input genes are equally likely to have heat.
+  # expectedHeatOut <- rowSums(S_matrix)
+  # if (networkHeatOnly){
+  #   expectedHeatOut <- expectedHeatOut - diag(S_matrix)
+  # }
+  # 
+  
+  # expected Heat will vary based on coverage of dataset, calculate per dataset:
+  expectedHeatOut <- sapply(geneHeatsList, calculateExpectedHeat, S_matrix, permuteOnlyInObserved, networkHeatOnly)
+
+    
   # make initial heat matrix (each column is one source of heat)
   heat.0.mat <- sapply(geneHeatsList, makeHeat.0, fullGenes = rownames(S_matrix))
   
@@ -83,9 +204,10 @@ NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPerm
   # transform heats by log2FC (cut off less than zero)
   stopifnot (all(dim(propagatedHeat.mat) == dim(expectedHeatOut)))
   log2PropHeat <- log2(propagatedHeat.mat) - log2(expectedHeatOut)
-  log2PropHeat[log2PropHeat < 0.0] <- 0.0
+  #log2PropHeat[log2PropHeat < 0.0] <- 0.0
+  #heatToBeat <- apply (log2PropHeat, 1, prod)
   
-  heatToBeat <- apply (log2PropHeat, 1, prod)
+  heatToBeat <- rowSums(log2PropHeat)
   
   
   # permute
@@ -121,18 +243,21 @@ NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPerm
 
   message (now(), " Transforming permutations to log2FC vs expected")
   permutedHeats.mat3d <- sweep (log2(permutedHeats.mat3d), c(1,3), log2(expectedHeatOut))
-  permutedHeats.mat3d[permutedHeats.mat3d < 0] <- 0.0
   
-  # 3rd dimension of permutedHeats.mat3d is data type.  collapse/integrate across data types by taking the product
+  #permutedHeats.mat3d[permutedHeats.mat3d < 0] <- 0.0
+  
+  # 3rd dimension of permutedHeats.mat3d is data type.  collapse/integrate across data types by taking the product; os sum in log space
   message (now(), " Integrating permutations by product")
+  
+  all.permuted <- rowSums(permutedHeats.mat3d, dims = 2)
+  
   
   #the obvious way of doing it is very slow.
   #all.permuted <- pbapply::pbapply(permutedHeats.mat3d, c(1,2), prod)
-  
   #faster to do use rowSums on a log transformed array:
-  log.h <- log2(permutedHeats.mat3d)
-  log.ap <- rowSums(log.h, dims = 2)
-  all.permuted <- exp(log.ap)
+  # log.h <- log2(permutedHeats.mat3d)
+  # log.ap <- rowSums(log.h, dims = 2)
+  # all.permuted <- exp(log.ap)
   
   # done with permutedHeats.mat3d, free up the memory
   rm(permutedHeats.mat3d, log.ap, log.h)
@@ -144,10 +269,12 @@ NetworkPropagate.multiHeats.S_matrix <- function(S_matrix, geneHeatsList,numPerm
   pValue <- countsAbove/ncol(all.permuted)
   
   results <- data.table (gene = rownames(S_matrix),
-                         heat0 = heat.0.mat,
+                         heat0 = heat.0.mat, # matrix, will get column names appended to heat0
                          expectH = expectedHeatOut,  # a matrix, will get colnames
-                         propH = propagatedHeat.mat,
-                         avgLog2FC.PvsE = heatToBeat^(1/ncol(heat.0.mat)),  # undo the product, effectively the geometric mean now
+                         propH = propagatedHeat.mat, # a matrix
+                         log2PvE= log2PropHeat, # a matrix
+                         log2PvE = heatToBeat,
+                         #avgLog2FC.PvsE = heatToBeat^(1/ncol(heat.0.mat)),  
                          pvalue = pValue,
                          adj.pvalue = p.adjust(pValue, method="BH") )
 
@@ -214,12 +341,27 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   pValue <- countsAbove/ncol(permutedHeats)
   
   
+  message (now(), " Summarizing Z statistics")
+  permutedMeans <- apply(permutedHeats, 1, mean)
+  permutedMedians <- apply(permutedHeats,1,  median)
+  permutedSD  <- apply(permutedHeats,1, sd) 
+  
+  
   results <- data.table (gene = rownames(S_matrix),
                          heat.0 = heat.0,
                          prop.heat = propagatedHeat[,1],
                          pvalue = pValue,
                          adj.pvalue = p.adjust(pValue, method="BH"),
-                         self.heat = heat.0 * diag(S_matrix))
+                         self.heat = heat.0 * diag(S_matrix),
+                         mean.perm.heat = permutedMeans,
+                         median.perm.heat = permutedMedians,
+                         sd.perm.heat = permutedSD)
+  
+  if (networkHeatOnly == TRUE){
+    results[, z:= (prop.heat - self.heat - mean.perm.heat)/sd.perm.heat ]
+  }else{
+    results[, z:= (prop.heat - mean.perm.heat)/sd.perm.heat ]
+  }
   
   if (calculateContributions == TRUE){
     if (!is.null(genesInContributionsTable)){
@@ -232,7 +374,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
     toFromTable <- CalculateContributions (S_matrix, heat.0, sigGenes, networkHeatOnly)
     return(list(results = results, contributions = toFromTable))
   }else{
-    return(results)
+    return(results[])
   }
 }
 
@@ -305,6 +447,8 @@ calculateExpectedHeat <- function (geneHeats, S_matrix, limitToObserved, network
     if (networkHeatOnly){
       expectedHeatOut[rcIndex] <- expectedHeatOut[rcIndex] - diag(S_matrix)[rcIndex]
     }
+    
+    expectedHeatOut <- expectedHeatOut * nrow(S_matrix)/length(rcIndex)
   }else{
     # expected heat outs is row sums of S_matrix. Assumes all input genes are equally likely to have heat.
     expectedHeatOut <- rowSums(S_matrix)
