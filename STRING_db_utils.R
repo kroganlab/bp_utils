@@ -50,7 +50,16 @@ GetStringIDMapping.inOrder <- function(ids, stringAliasFile = "/Users/ben/Downlo
 
 
 require (igraph)
-subsetSTRINGasGraph <- function(stringIDs, stringFile = NULL, threshold = 600 ){
+
+# namedThresholds = c(experimental = 900)
+
+subsetSTRINGasGraph <- function(stringIDs, stringFile = "/Users/ben/Downloads/9606.protein.links.detailed.v11.5.txt.gz", threshold = 600, namedThresholds = c()){
+  
+  string <- fread (stringFile)
+  
+  if (length(stringIDs) == 1 & is.numeric(stringIDs)){
+    stringIDs <- sample(unique(c(string$protein1, string$protein2)), size = stringIDs)
+  }
   
   if ("data.frame" %in% class(stringIDs)){
     vTable <- as.data.table(stringIDs)
@@ -60,8 +69,13 @@ subsetSTRINGasGraph <- function(stringIDs, stringFile = NULL, threshold = 600 ){
     vTable <- data.table(name = stringIDs)
   }
   
-  string <- fread (stringFile)
+  
   edges <- string[combined_score > threshold & protein1 %in% stringIDs & protein2 %in% stringIDs]
+  
+  for (name in names(namedThresholds)){
+    edges <- edges[ edges[[name]] >= namedThresholds[name],]
+      
+  }
   
   # de-duplicate
   edges[protein1 > protein2, c("protein1", "protein2") := .(protein2, protein1)]
@@ -128,7 +142,17 @@ GetStringSubNetwork <- function (stringsOI,
                                  minString = 600,
                                  oneHopConnections = FALSE){
   
-  string <- fread(stringFile)
+  if ("data.table" %in% class(stringFile)){
+    string <- stringFile    
+  } else{
+    string <- fread (stringFile)
+  }
+  
+  
+  if (length(stringsOI) == 1 & is.numeric(stringsOI)){
+    stringsOI <- sample(unique(c(string$protein1, string$protein2)), size = stringsOI)
+    print (sort(stringsOI))
+  }
   
   # edges between stringsOI
   sigNetworkSet <- string[combined_score > minString & 
