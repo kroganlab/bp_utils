@@ -119,9 +119,9 @@ convertMassModificationFormat <- function(specModSequence, mods=c("PH",  "CAM", 
 }
 
 sitifyProteins_SpectronautFile <- function (specFile.dt, 
-                                            site = c("PH", "KAC", "KMETI", "KMETII", "KMETII"), #addd options for other ptms
+                                            site = c("PH", "UB", "KAC", "NAC", "MMET", "DMET", "TMET"), #addd options for other ptms
                                             fastaFile = "~/UCSF/kroganlab/BenPolacco/data/human_all_proteins_canonical_uniprot-proteome_UP000005640.fasta.gz" ){
-  stopifnot(site %in% c("PH", "KAC", "KMETI", "KMETII", "KMETIII"))  
+  stopifnot(site %in% c("PH", "KAC", "NAC", "UB", "MMET", "DMET", "TMET"))  
   shortPTM = tolower(site) #throwing errors in parenLowerCaseToProteinSiteNames if numeric chars included
   
   
@@ -161,7 +161,7 @@ sitifyProteins_SpectronautFile <- function (specFile.dt,
 
 
 
-convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "DEA", "MOX", "NAC", 'KAC', 'KMETI', 'KMETII', 'KMETIII'), keepOnly = NULL, removeAll = FALSE){
+convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "UB", "CAM", "DEA", "MOX", "NAC", 'KAC', 'MMET', 'DMET', 'TMET'), keepOnly = NULL, removeAll = FALSE){
   result <- specModSequence
   # these are overly complicated because they match both S[Phospho (STY)] and S(Phospho (STY))
   specFormats <- list (PH='([STY])[[(]Phospho \\(STY\\)[])]',
@@ -171,21 +171,22 @@ convertSpectronautModificationFormat <- function(specModSequence, mods=c("PH", "
                        MOX = '([M])[[(]Oxidation \\(M\\)[])]',
                        NAC =  '([A-Z_])[[(]Acetyl \\(Protein N-term\\)[])]',
                        KAC = '(K)[[(]Acetyl \\(K\\)[])]',
-                       KMETI= '(K)[[(]Methyl \\(K\\)[])]',
-                       KMETII= '(K)[[(]Dimethyl \\(K\\)[])]',
-                       KMETIII= '(K)[[(]Trimethyl \\(K\\)[])]',
+                       MMET= '(K)[[(]Methyl \\(K\\)[])]',
+                       #KMETII= '([KN])[[(]Dimethyl \\(K\\)[])]',
+                       DMET='([KN])[[(]Dimethyl\\s?([(][KN][)])?[]]',
+                       TMET= '(K)[[(]Trimethyl \\(K\\)[])]',
                        ANY =          '[[(][^][)(]*\\([^][)(]*\\)[])]' )  # suggest regex101.com to parse this visually, paste and then change \\
 
   artmsFormats <- list (PH='\\1\\(ph\\)',
-                        UB='\\1\\(gl\\)',
+                        UB='\\1\\(ub\\)',
                         DEA='\\1\\(dea\\)',
                         CAM = '\\1\\(cam\\)',
                         MOX = '\\1\\(ox\\)',
-                        NAC = '\\1\\(ac\\)',
+                        NAC = '\\1\\(nac\\)',
                         KAC = '\\1\\(kac\\)',
-                        KMETI = '\\1\\(kmeti\\)',
-                        KMETII = '\\1\\(kmetii\\)',
-                        KMETIII = '\\1\\(kmetiii\\)',
+                        MMET = '\\1\\(mmet\\)',
+                        DMET = '\\1\\(dmet\\)',
+                        TMET = '\\1\\(tmet\\)',
                         ANY = '')  # for removal purposes
 
   stopifnot(names(specFormats)==names(artmsFormats))
@@ -313,12 +314,12 @@ loadUniprots <- function(ids, fastaFile = NULL, downloadFromWeb = FALSE){
 #' @param fastaFile string path to the fastaFile from which to lookup the sequences that match `uniprots`
 #' @param downloadFromWeb boolean
 #' @param proteinSiteSep  The string to put between the uniprot and site ID
-parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = c("ph", "kac", "kmeti", "kmetii", "kmetiii"), fastaFile = NULL, downloadFromWeb = FALSE, proteinSiteSep = "_"){
-  stopifnot(shortPTM %in% c("ph","kac","kmeti", "kmetii", "kmetiii"))
+parenLowerCaseToProteinSiteNames <- function(uniprots, parenLowerCaseFormats, shortPTM = "ph", fastaFile = NULL, downloadFromWeb = FALSE, proteinSiteSep = "_"){
+  stopifnot(shortPTM %in% c("ph", "ub", "kac", "nac", "mmet", "dmet", "tmet"))
   mapper <- data.table(uniprot = uniprots, parenLowerCaseFormat = parenLowerCaseFormats)
-  
+
   # remove all but 1 type of PTM
-  allButMyPTM.regex  <- sprintf("\\((?!%s\\b)[a-z]*\\)", shortPTM) #\b word boundary to neg lookahead to prevent matching trailing kmet i's
+  allButMyPTM.regex  <- sprintf("\\((?!%s\\b)[a-z]*\\)", shortPTM) #neg lookahead to match any char within parenthesis excl. shortPTM
   mapper[, only1PTM := gsub ( allButMyPTM.regex, "",parenLowerCaseFormat, perl = TRUE)]
 
   
