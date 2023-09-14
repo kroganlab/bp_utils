@@ -180,9 +180,10 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
                                          dimnames=list(levels(gmt.subset$ont), 
                                                        levels(gmt.subset$gene)))
   
-  #go_dist_mat <- dist(termByGeneMat, method="binary")
+  go_dist_mat <- dist(termByGeneMat, method="binary")
   # maybe this is faster?  I haven't clocked it
-  go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
+  # I don't thnk it is .  Takes as long, but uses all your processors while you do it
+  #go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
   
   if (hclustMethod != "complete" & cutHeight == 0.99){
       message ("You requested to cluster using method ", hclustMethod, " but didn't change from default cutHeight from 0.99. It is recommended you adjust cutHeight")
@@ -328,7 +329,9 @@ library (ComplexHeatmap)
 enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable = NULL, fullEnrichTable = NULL,
                                       pipeLineList = NULL,
                                       groupColumn= NULL, topN = 1, title="", cols = NULL, 
-                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, max_pAdjust = 0.01, minCount = 1,
+                                      negCols = NULL, reduceRedundantsAcrossGroups=TRUE, 
+                                      max_pAdjust = 0.01, minCount = 1,
+                                      colorGray.padjust = NULL, # same as max_pAdjust when NULL
                                       annotatePossibleMatches = TRUE,  row_names_gp = gpar(fontsize = 10),
                                       upperThreshold  = NULL,
                                       pvalColumn = "p.adjust", ...){
@@ -418,6 +421,8 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable = NULL, fullEnrichTa
     topBars <- NULL
   }
   
+  if (! is.null(colorGray.padjust))
+    max_pAdjust <- colorGray.padjust
   hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = topBars, row_names_gp = row_names_gp,
                          upperThreshold = upperThreshold,...)
   
@@ -444,8 +449,8 @@ enrichmentOnGroupsPL <- function (groupTable, geneColumn, groupColumns, gmt,univ
   simp <- simplifyEnrichBySimilarUniverseMembership(enrich.dt, gmt, groupColumn,
                                                     cutHeight = 0.99, broadest = FALSE,
                                                     max_pAdjust = max_pAdjust)
-  enrichHM <- enrichHeatmapBestPerGroup(simp[[1]], simp[[2]], 
-                                        groupColumn, topN,
+  enrichHM <- enrichHeatmapBestPerGroup(simplifiedEnrichTable = simp[[1]], fullEnrichTable = simp[[2]], 
+                                        groupColumn = groupColumn, topN = topN,
                                         reduceRedundantsAcrossGroups = reduceRedundantsAcrossGroups,
                                         max_pAdjust = max_pAdjust,
                                         ...)
