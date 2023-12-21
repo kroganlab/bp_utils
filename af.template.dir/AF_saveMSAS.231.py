@@ -51,6 +51,10 @@ def parse_args():
     help = "Disable to skip the setup steps (msa copying, pair fasta writing)")
     
   parser.add_argument(
+    '--prevent_alphafold_output', type = str_to_bool, default = False,
+    help = "attempts to lock files in output directory to kill the alphafold job early (good for MSA generation on non-GPU nodes)")
+    
+  parser.add_argument(
     '--postprocess_job', type = str_to_bool, default = True,
     help = "Disable to skip the job postprocessing (score extraction from pickle files and copying MSA)")
 
@@ -289,6 +293,9 @@ def main():
     print ("Not running alphafold as requested by run_alpha_fold=False")
   
   ########### clean up tasks ###########
+  if args.prevent_alphafold_output:
+    alphaFoldLockFiles( os.path.split(args.fasta_paths)[0], lock = False)
+
   if args.postprocess_job:
     # scores
     BP_processScores(args)  
@@ -351,9 +358,18 @@ def getMSADirectoryForSequence(sequence, alignmentRepo):
   
 
 def alphaFoldRunOutputDirectory(seq1, seq2, outputPath):
-  return os.path.join(outputPath, f"{seq1}_{seq2}")
+  return os.path.join(outputPath, f"{seq1}__{seq2}")
 
-#
+
+def alphaFoldLockFiles (outDir, lock = True):
+  for fn in ("relaxed_model_1_multimer_v3_pred_0.pdb", "result_model_1_multimer_v3_pred_0.pkl", "unrelaxed_model_1_multimer_v3_pred_0.pdb"):
+    fullName = os.path.join(outDir,fn)
+    if not (os.path.isfile(fullName)):
+      with open(fullName, "a") as fp:
+        pass
+    os.chmod(fullName, 0o444)
+  
+
 def BP_setupJob(args):
   jobID = args.job_id
   with open(args.jobTable) as fp:
@@ -394,6 +410,9 @@ def BP_setupJob(args):
         shutil.copytree(msaDir, localDir)
       else:
           print (f"Not copying MSA to local {chainID}:{seqName} at {msaDir} because {'no archive MSA' if not os.path.isdir(msaDir) else 'local msa exists'}")
+  
+  if args.prevent_alphafold_output:
+    alphaFoldLockFiles(outDir, lock = True)
         
   return fastaPath
 
