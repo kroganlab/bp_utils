@@ -1,6 +1,6 @@
 #
 
-emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue){  # how does the drug effect change per tissue
+example.emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue){  # how does the drug effect change per tissue
   emm <- emmeans(l, factorFormula)
   contrast1 <- pairs(emm)
   contrast2 <- pairs(contrast1, by = NULL, adjust = "none")
@@ -18,7 +18,7 @@ emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue){  # ho
 #' @param emmeansFormula  a formula (or other object) passed as second argument to emmeans. It is expected to be
 #'                        used int he context of contrasts so it must produce a $contrasts field in the output
 #'                        examples: emmeansFormula = pairwise~GROUP_ORIGINAL or emmeansFormula = trt.vs.ctrl~GROUP_ORIGINAL
-#' @param postProcessFunction  a function that receives an lm and returns a data.table. See emmeans.contrastOfContrasts for an example 
+#' @param postProcessFunction  a function that receives an lm and returns a data.table. See example.emmeans.contrastOfContrasts for an example 
 
 linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,
                                      emmeansFormula = NULL, returnLMs = FALSE, postProcessFunction = NULL){
@@ -109,17 +109,21 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
     residuals.dt <- rbindlist(residuals.list, idcol = "model")
     
     # get all contrasts from emmeans
+    contrastTable <- NULL
     if (!is.null(emmeansFormula)){
-      contrasts.list <- lapply(lms, function(l)as.data.table(emmeans::emmeans(l, emmeansFormula)$contrasts))
-      contrastTable <- rbindlist(contrasts.list, idcol = "model")
-      setnames(contrastTable, "p.value", "Tukey.p")
-      if ("t.ratio" %in% colnames(contrastTable)){
-        contrastTable[, p.t := pt(abs(t.ratio), df = df, lower.tail = FALSE) * 2]
-      } else{
-        contrastTable[, p.t := NA]
+        contrasts.list <- lapply(lms, .errorWarningCatcherFactory(function(l)as.data.table(emmeans::emmeans(l, emmeansFormula)$contrasts))) |>
+          lapply(`[[`, "value") # get values, discard errors/warnings
+        contrasts.list <- contrasts.list[!sapply(contrasts.list, is.null)]
+      
+      if (length(contrasts.list) > 0){ # possible when function above fails
+        contrastTable <- rbindlist(contrasts.list, idcol = "model")
+        setnames(contrastTable, "p.value", "Tukey.p")
+        if ("t.ratio" %in% colnames(contrastTable)){
+          contrastTable[, p.t := pt(abs(t.ratio), df = df, lower.tail = FALSE) * 2]
+        } else{
+          contrastTable[, p.t := NA]
+        }
       }
-    }else{
-      contrastTable <- NULL
     }
     if(!is.null(postProcessFunction)){
       postProcess.out <- lapply (lms, .errorWarningCatcherFactory(postProcessFunction) )

@@ -305,6 +305,8 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   }
   
   
+  expect.heat <- calculateExpectedHeat(geneHeats, S_matrix, limitToObserved = permuteOnlyInObserved, networkHeatOnly = networkHeatOnly)
+  
   message (now(), " Propagating initial heat")
   
   heat.0 <- makeHeat.0(geneHeats, fullGenes = rownames(S_matrix))
@@ -336,7 +338,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
   # maybe more memory friendly
   countsAbove <- rep(0, nrow(permutedHeats))
   for (i in 1:ncol(permutedHeats)){
-    countsAbove <- countsAbove + as.integer(permutedHeats[,i] > heatToBeat)
+    countsAbove <- countsAbove + as.integer(permutedHeats[,i] >= heatToBeat)
   }
   pValue <- countsAbove/ncol(permutedHeats)
   
@@ -353,6 +355,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
                          pvalue = pValue,
                          adj.pvalue = p.adjust(pValue, method="BH"),
                          self.heat = heat.0 * diag(S_matrix),
+                         expect.heat = expect.heat,
                          mean.perm.heat = permutedMeans,
                          median.perm.heat = permutedMedians,
                          sd.perm.heat = permutedSD)

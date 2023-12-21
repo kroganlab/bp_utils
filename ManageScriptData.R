@@ -76,16 +76,16 @@ GetLatestScriptFile <- function(x, scriptName=NULL, include.dirs = FALSE){
 #' and when there is a clash a further counter suffix is added
 #' @param prefix optional string to label pdf names
 #' @subDir prefix an optional subdirectory name. Useful when a loop generates numerous related pdfs at a time
-PDFBackupFileName <- function(prefix = "", subDir = ""){
+PDFBackupFileName <- function(prefix = "", subDir = "", suffix = "pdf"){
   scriptDir <- ScriptNamedDir()
   imageDir <- file.path(scriptDir, "pdfs", subDir)
   if (!dir.exists(imageDir)) dir.create(imageDir, recursive = TRUE)
   now <- format(Sys.time(),  "%Y_%m_%d__%H_%M__%S")
   counter <- 0
-  path <- file.path (imageDir, sprintf("%s%s.%02d.pdf", prefix, now, counter))
+  path <- file.path (imageDir, sprintf("%s%s.%02d.%s", prefix, now, counter, suffix))
   while (file.exists(path)){
     counter <- counter + 1
-    path <- file.path (imageDir, sprintf("%s%s.%02d.pdf", prefix, now, counter))
+    path <- file.path (imageDir, sprintf("%s%s.%02d.%s", prefix, now, counter, suffix))
   }
   return (path)
 }

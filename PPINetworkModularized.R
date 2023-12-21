@@ -63,7 +63,9 @@ shiftNodes2AvoidOverlaps <- function (tsne.dt, sumFunction = sum, overlapParam =
     ct <- subTable[subTable,, on = "dummy", allow.cartesian  = TRUE][gene != i.gene & sqrt((x-i.x)^2 + (y - i.y)^2) < overlapParam * (r + i.r) ]
     cat (nrow(ct), " rows in collision table\n")
     
-    ct[ x == i.x & y == i.y, c("x", "y") := .(x + r/100, y + r/100)]
+    # when x,y match exactly, adjust them  based on 1% radius:
+    ct[ x == i.x & y == i.y, c("x", "y") := .(ifelse(gene < i.gene, x + r/100, x - r/100),
+                                              ifelse(gene < i.gene, y + r/100, y - r/100))]
     
     ct[, c("dx", "dy") := .(x-i.x, y-i.y)]
     ct[, distance := sqrt(dx^2 + dy^2)]
@@ -176,7 +178,8 @@ wrapStrings <- function (strings, width){
 }
 
 
-    moduleNetworkView <- function(tsne.dt, edgeView.dt, clusterCloudExclude, moduleMedoids.dt, maxEdgeLength = 25, doClouds = TRUE){
+moduleNetworkView <- function(tsne.dt, edgeView.dt, clusterCloudExclude, moduleMedoids.dt, maxEdgeLength = 25, doClouds = TRUE, polygonCloud = FALSE,
+                              emphasizeBaitBaitEdges = FALSE, baitLabels = TRUE){
   # MAKE the view
   p <- ggplot(tsne.dt, aes (x = x, y = y))
   
@@ -187,8 +190,11 @@ wrapStrings <- function (strings, width){
       subData <- tsne.dt[clusterID ==i & type == "prey" & nameMatch == TRUE]
       if(nrow(subData) >= 5){
         print (i)
-        p <- p + cloudAsPolygon(subData, lims = c(range(tsne.dt$x), range (tsne.dt$y)))
-        #p <- p + stat_density_2d(geom = "polygon", data = subData, aes(alpha = ..level.., fill = nodeColor), show.legend = FALSE)
+        if (polygonCloud){
+          p <- p + cloudAsPolygon(subData, lims = c(range(tsne.dt$x), range (tsne.dt$y)))
+        }else {
+          p <- p + stat_density_2d(geom = "polygon", data = subData, aes(alpha = ..level.., fill = nodeColor), show.legend = FALSE)
+        }
       }
     }
   }else{
@@ -202,8 +208,9 @@ wrapStrings <- function (strings, width){
     
   # bait-prey edges
   p <- p +  
-    #geom_segment(aes(x,y, xend = xend,      yend = yend,      color = preyColor), alpha = 0.1, linewidth = 0.2, size= NULL,  data =  edgeView.dt[ ]) +
-    geom_segment(aes(x,y, xend = xend.stub, yend = yend.stub, color = preyColor), alpha = 0.5, linewidth = 0.3, size= NULL,  data =  edgeView.dt[ ]) +
+    geom_segment(aes(x,y, xend = xend,      yend = yend,      color = preyColor), alpha = 0.2, linewidth = 0.25, size= NULL,  data =  edgeView.dt[ ]) +
+    
+    #geom_segment(aes(x,y, xend = xend.stub, yend = yend.stub, color = preyColor), alpha = 0.5, linewidth = 0.3, size= NULL,  data =  edgeView.dt[ ]) +
     
     # bait module edges
     #geom_segment(aes(x,y, xend = xend,      yend = yend,      color = preyColor, linewidth = numPPI), alpha = 0.3,    data =  edgeView.dt[type == "module" & numPPI > 1 & (baitRank < 3 | moduleRank < 3)]) +
@@ -211,27 +218,31 @@ wrapStrings <- function (strings, width){
     
     
     # bait - bait edges
-    # geom_segment(aes(x,y, xend = xend, yend = yend, color = preyColor), alpha = 0.5, linewidth = 0.3, size= NULL,  data =  edgeView.dt[Prey %in% Bait]) +
-    
+    # ifelse(emphasizeBaitBaitEdges == TRUE,
+            #geom_segment(aes(x,y, xend = xend, yend = yend, color = preyColor), alpha = 0.5, linewidth = 0.3, size= NULL,  data =  edgeView.dt[Prey %in% Bait]) +
+    #        c()) +
+    # 
     # baits
-    #geom_point(data = tsne.dt[type == "bait"], alpha = 0.9, size = 3, shape = 23, show.legend = FALSE,  mapping = aes(fill = nodeColor)) +
+    geom_point(data = tsne.dt[type == "bait"], alpha = 0.9, size = 3, shape = 23, show.legend = FALSE,  mapping = aes(fill = nodeColor)) +
     scale_fill_identity( na.value= "grey30") + 
     
     # preys
-    geom_point(data = tsne.dt[type == "prey"], alpha = 0.3, shape = 21, show.legend = FALSE, mapping = aes(fill = nodeColor, color = nodeColor, size = baitPerPrey)) +
+    geom_point(data = tsne.dt[type == "prey"], alpha = 0.5, shape = 21, show.legend = FALSE, mapping = aes(fill = nodeColor, color = nodeColor, size = baitPerPrey)) +
     scale_color_identity(na.value = "grey70") +
     scale_size_area(max_size = 2) + 
     
     
     # module labels
     #ggrepel::geom_text_repel(aes(label  = wrapStrings(go, width = 22) ), data = moduleMedoids.dt[N >=5 & !clusterID %in% clusterCloudExclude], size = 2, max.overlaps = 100, show.legend = FALSE, fill = NA, bg.color = "white", bg.r = 0.15) +
-    geom_text(aes(label  = wrapStrings(go, width = 18), color = nodeColor ), data = moduleMedoids.dt[N >=5 & !clusterID %in% clusterCloudExclude], size = 3,  show.legend = FALSE) +
+    #, color = nodeColor 
+    geom_text(aes(label  = wrapStrings(go, width = 18)), data = moduleMedoids.dt[N >=5 & !clusterID %in% clusterCloudExclude], size = 3,  show.legend = FALSE) +
     #geom_text(aes(label  = go, x = perimeterX, y = perimeterY, color = nodeColor), data = moduleMedoids.dt[N >=5 & !clusterID %in% clusterCloudExclude], size = 2, max.overlaps = 100, show.legend = FALSE, fill = NA, bg.color = "white", bg.r = 0.15) +
     #geom_segment(aes( x = perimeterX, y = perimeterY, xend = x, yend = y, color = nodeColor), data = moduleMedoids.dt[N >=5 & !clusterID %in% clusterCloudExclude], show.legend = FALSE, linetype = "dotted") +
     
     # bait labels
-    #ggrepel::geom_text_repel(data = tsne.dt[type == "bait"], aes (label = gene ), size = 2, show.legend = FALSE, bg.color = "white", bg.r = 0.15) + 
-    
+    #ifelse(baitLabels == TRUE,
+           ggrepel::geom_text_repel(data = tsne.dt[type == "bait"], aes (label = gene ), size = 2, show.legend = FALSE, bg.color = "white", bg.r = 0.15, seed = 1)+
+
     coord_fixed(clip = "off", xlim = range (tsne.dt$V1) * 1.2, ylim = range(tsne.dt$V2) * 1.2) + # only works if range is negative/positive
     theme_void()
   
@@ -252,7 +263,7 @@ defineModulesFromDistance <- function (dsd.path, geneNamesOI = NULL,
   
   dsd.dist <- as.dist(dsd.mat)
   hc.average <- hclust (dsd.dist, method= "average")
-  dtc <- dynamicTreeCut::cutreeHybrid(hc.average, distM = dsd.mat, deepSplit = 0, minClusterSize = 5)
+  dtc <- dynamicTreeCut::cutreeHybrid(hc.average, distM = dsd.mat, deepSplit = deepSplit, minClusterSize = 5)
   
   cluster.dt <- data.table (gene = hc.average$labels, clusterID = dtc$labels, core = dtc$cores)
   cluster.dt[clusterID == 0, clusterID := NA]
@@ -315,8 +326,9 @@ buildModuleNetworkView <- function (data.list = NULL,
                                     
                                     collapseModules = FALSE,
                                     
-                                    maxEdgeLength = 20, stubEdgeLength = 10,
+                                    maxEdgeLength = Inf, stubEdgeLength = 10,
                                     clusterCloudExclude = c( ),
+                                    adjustModuleLabels = NULL,
                                     ...){
   
   # baitPrey.dt
@@ -390,6 +402,15 @@ buildModuleNetworkView <- function (data.list = NULL,
   # compute a position on the perimeter
   moduleMedoids.dt <- moveLabelsToPerimeter(moduleMedoids.dt, xlim = range(tsne.dt$V1) * 1.1, ylim = range(tsne.dt$V2) * 1.2)
   
+  if (!is.null(adjustModuleLabels)){
+    adjust.dt <- data.table(go = names(adjustModuleLabels),
+                            x.adjust = sapply(adjustModuleLabels, `[`, 1),
+                            y.adjust = sapply(adjustModuleLabels, `[`, 2))
+    moduleMedoids.dt[adjust.dt,
+                     c("x", "y") := .(x + x.adjust, y + y.adjust)
+                     , on = "go"]
+    }
+
   
   # segment table (connect the dots in tsne.dt  )
   edgeView.dt <- tsne.dt[baitPrey.dt, .(Bait, Prey, x = x, y= y), on= c(gene = "Bait")
