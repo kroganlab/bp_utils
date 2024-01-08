@@ -58,6 +58,10 @@ def parse_args():
     '--postprocess_job', type = str_to_bool, default = True,
     help = "Disable to skip the job postprocessing (score extraction from pickle files and copying MSA)")
 
+  parser.add_argument(
+          '--check_if_completed', type = str_to_bool, default = True,
+          help = "Check if the run is completed already. If so, don't rerun.")
+
   # /END BP added arguments
 
   parser.add_argument(
@@ -283,14 +287,17 @@ def main():
 
   from subprocess import run
   import sys
-  if args.run_alpha_fold:
+  if args.run_alpha_fold and BP_notYetCompleted(args):
     run('module load cuda/11.0 ; %s' % cmd,
         stdout = sys.stdout, stderr = sys.stderr,
         shell = True,  # module command is a csh alias on Wynton
         executable = '/bin/csh',
         check = True)
   else:
-    print ("Not running alphafold as requested by run_alpha_fold=False")
+    if not args.run_alpha_fold:
+      print ("Not running alphafold as requested by run_alpha_fold=False")
+    else:
+      print ("Alphafold appears to be completed already, not running")
   
   ########### clean up tasks ###########
   if args.prevent_alphafold_output:
@@ -299,7 +306,7 @@ def main():
   if args.postprocess_job:
     # scores
     BP_processScores(args)  
-   # archive the MSAS
+    # archive the MSAS
     BP_archiveMSAs(args)
   ######################################
 
@@ -415,6 +422,14 @@ def BP_setupJob(args):
     alphaFoldLockFiles(outDir, lock = True)
         
   return fastaPath
+def BP_notYetCompleted(args):
+  if (args.check_if_completed == False):
+    return True
+  outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
+  if os.path.isfile(os.path.join(outDir, "result_model_5_multimer_v3_pred_0.pkl")):
+    return False 
+  return True
+
 
 def BP_archiveMSAs(args):
   outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
