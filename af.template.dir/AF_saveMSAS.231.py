@@ -422,6 +422,42 @@ def BP_setupJob(args):
     alphaFoldLockFiles(outDir, lock = True)
         
   return fastaPath
+  
+def BP_validStockholmFile(fileName):
+  with fopen(fileName) as fp:
+    lastLine = fp.readlines()[-1].strip()
+    return lastLine == "//"
+
+
+def BP_validA3Mfile(fileName):
+  with fopen(fileName) as fp:
+    first = fp.readlines()[1].strip()
+    return first[0] == ">"
+
+  
+def BP_MSACompleted(msaDir):
+  # 
+  msaFiles = ("bfd_uniref_hits.a3m",
+  "mgnify_hits.sto",
+  "pdb_hits.sto",
+  "uniprot_hits.sto",
+  "uniref90_hits.sto")
+  
+  # all files have to be present
+  if not all([os.path.isfile(os.path.join(msaDir, mf)) for mf in msaFiles]):
+    return False
+    
+  # check .sto files
+  if not all ([BP_validStockholmFile(mf) for mf in msaFiles where mf[-4:] == ".sto"]):
+    return False
+    
+  # check .a3m files
+  if not all ([BP_validA3Mfile(mf) for mf in msaFiles where mf[-4:] == ".a3m"]):
+    return False
+  
+  return True
+    
+  
 def BP_notYetCompleted(args):
   if (args.check_if_completed == False):
     return True
@@ -434,9 +470,10 @@ def BP_notYetCompleted(args):
 def BP_archiveMSAs(args):
   outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
   # see if there are succesful msas to copy over...
-  # we use the presence of file features.pkl as evidence that msas completed.
-  # this is probably over-stringent in that it only appears after all MSAs are completed.
-  if not os.path.isfile(os.path.join(outDir, "features.pkl")):
+  #  OLD we use the presence of file features.pkl as evidence that msas completed.
+  #  OLD this is probably over-stringent in that it only appears after all MSAs are completed.
+  if False #OLD not os.path.isfile(os.path.join(outDir, "features.pkl")):
+    # obsolete chunk here, I know use good looking msa files as sign of completeness
     print ("MSAs appear not to have finished, not copying to msa repository")
     print (os.path.join(outDir, "features.pkl"))
   else:
@@ -445,8 +482,11 @@ def BP_archiveMSAs(args):
     chainIDs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     for i,name in enumerate(namesInOrder):
       chainID = chainIDs[i]
-      msaRepoDir = getMSADirectoryForSequence(dimerSeqs[name], args.alignmentRepo)
       msaRunDir = os.path.join(outDir, "msas", chainID)
+      if not BP_MSACompleted(msaRunDir):
+        print ("MSAs in directory {msaRunDir} appear incomplete, not copying to archive")
+        continue
+      msaRepoDir = getMSADirectoryForSequence(dimerSeqs[name], args.alignmentRepo)
       if (os.path.isdir(msaRepoDir)):
           repoFiles = os.listdir(msaRepoDir)
       else:
