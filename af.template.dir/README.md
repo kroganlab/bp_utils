@@ -14,7 +14,7 @@ After setting up the directory (through step 3 above), you will submit several j
 
 ### 1) MSA management
 
-MSA creation is included in the main alphafold python script, but it does benefit from access to a GPU. Two approaches are possible here.  Submit regular jobs to non-GPU nodes and kill the jobs manually or let them die when time limit is reached (edit and submit job script `af.noGPU.sh`).  Or **recommended**, submit jobs with a special locked file that will cause alphafold to crash when it tries to write to it.  This is activated in job script `af.msa.sh`.  As above, edit the task numbers, then submit with
+MSA creation is included in the main alphafold python script, but it does not actually benefit from access to a GPU. MSA generation can take hours. so we want the MSA step to run on the more plentiful CPU nodes. Two approaches are possible here.  Submit regular jobs to non-GPU nodes and then kill/let-die the jobs after MSA is complete (edit and submit job script `af.noGPU.sh`).  Or **recommended:**, submit jobs that create a special locked file that will cause alphafold to crash when it tries to write to it upon MSA completion.  This optin is activated in job script `af.msa.sh`.  As above, edit the task numbers in the .sh, then submit with
 
 ```
 qsub af.msa.sh
@@ -31,7 +31,7 @@ Jobs killed manually will not get a chance to copy their MSA to the MSA reposito
   
 ### 2) Jobs that can finish in 2 hours
 
-Wynton GPU jobs that take at most 2 hours (set in the shell script) are allowed to run on more GPU nodes than longer jobs.  This is sufficient time for many AF jobs.  Use `af.smallJobs.sh`, edit the task array field and:
+Wynton GPU jobs that take at most 2 hours (set in the shell script) are allowed to run on more GPU nodes than longer jobs.  This is sufficient time for many AF jobs, especially with the MSA step already completed.  Use `af.smallJobs.sh`, edit the task array field and:
 
 ```
 qsub af.smallJobs.sh
