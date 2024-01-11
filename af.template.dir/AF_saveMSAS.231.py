@@ -285,14 +285,19 @@ def main():
   print (cmd)
   print()
 
-  from subprocess import run
+  #from subprocess import run
+  import subprocess
   import sys
   if args.run_alpha_fold and BP_notYetCompleted(args):
-    run('module load cuda/11.0 ; %s' % cmd,
-        stdout = sys.stdout, stderr = sys.stderr,
-        shell = True,  # module command is a csh alias on Wynton
-        executable = '/bin/csh',
-        check = True)
+    try:
+      subprocess.run('module load cuda/11.0 ; %s' % cmd,
+          stdout = sys.stdout, stderr = sys.stderr,
+          shell = True,  # module command is a csh alias on Wynton
+          executable = '/bin/csh',
+          check = True)
+    except subprocess.CalledProcessError as e:
+      print (f"AlphaFold terminated early with error: {e}")
+    
   else:
     if not args.run_alpha_fold:
       print ("Not running alphafold as requested by run_alpha_fold=False")
@@ -332,7 +337,7 @@ def read_fasta(path):
     currentName = ""
     for line in fp.readlines():
       line = line.strip()
-      if line[0] == ">":
+      if line[0:1] == ">":
         currentName = nameFromHeader(line)
         if len(namesInOrder) == 0 or namesInOrder[-1] != currentName:
           namesInOrder.append (currentName)
@@ -369,13 +374,24 @@ def alphaFoldRunOutputDirectory(seq1, seq2, outputPath):
 
 
 def alphaFoldLockFiles (outDir, lock = True):
-  for fn in ("relaxed_model_1_multimer_v3_pred_0.pdb", "result_model_1_multimer_v3_pred_0.pkl", "unrelaxed_model_1_multimer_v3_pred_0.pdb"):
-    fullName = os.path.join(outDir,fn)
-    if not (os.path.isfile(fullName)):
-      with open(fullName, "a") as fp:
-        pass
-    os.chmod(fullName, 0o444)
-  
+  #lockedFiles = ("relaxed_model_1_multimer_v3_pred_0.pdb", "result_model_1_multimer_v3_pred_0.pkl", "unrelaxed_model_1_multimer_v3_pred_0.pdb")
+  lockedFiles =  ("features.pkl",)
+  if lock:
+    for fn in lockedFiles:
+      fullName = os.path.join(outDir,fn)
+      if not (os.path.isfile(fullName)):
+        with open(fullName, "a") as fp:
+          pass
+      print (f"locking file at {fullName} to prevent alphafold from running")
+      os.chmod(fullName, 0o444)
+  else:
+    for fn in lockedFiles:
+      fullName = os.path.join(outDir,fn)
+      if os.path.isfile(fullName):
+        currentPermissions = oct(os.stat(fullName).st_mode & 0o777)
+        print (f"unlocking existing file at {fullName} ({currentPermissions})")
+        os.chmod(fullName, 0o664)
+      
 
 def BP_setupJob(args):
   jobID = args.job_id
@@ -420,19 +436,27 @@ def BP_setupJob(args):
   
   if args.prevent_alphafold_output:
     alphaFoldLockFiles(outDir, lock = True)
+  else:
+    # unlock files that may have been locked previously
+    alphaFoldLockFiles(outDir, lock = False)
+
         
   return fastaPath
   
 def BP_validStockholmFile(fileName):
-  with fopen(fileName) as fp:
-    lastLine = fp.readlines()[-1].strip()
-    return lastLine == "//"
+  print (f"checking {fileName}")
+  with open(fileName, "rb") as fp:
+    fp.seek(-8, os.SEEK_END) # last 8 bytes
+    return "//" in str(fp.read())
+#    lastLine = fp.readlines()[-1].strip()
+#    return lastLine == "//"
 
 
 def BP_validA3Mfile(fileName):
-  with fopen(fileName) as fp:
-    first = fp.readlines()[1].strip()
-    return first[0] == ">"
+  print (f"checking {fileName}")
+  with open(fileName) as fp:
+    first = fp.readlines()[0].strip()
+    return first[0:1] == ">"
 
   
 def BP_MSACompleted(msaDir):
@@ -448,16 +472,18 @@ def BP_MSACompleted(msaDir):
     return False
     
   # check .sto files
-  if not all ([BP_validStockholmFile(mf) for mf in msaFiles where mf[-4:] == ".sto"]):
+  if not all ( (BP_validStockholmFile(os.path.join(msaDir, mf)) for mf in msaFiles if mf[-4:] == ".sto") ):
     return False
     
   # check .a3m files
-  if not all ([BP_validA3Mfile(mf) for mf in msaFiles where mf[-4:] == ".a3m"]):
+  if not all ( (BP_validA3Mfile(os.path.join(msaDir, mf)) for mf in msaFiles if  mf[-4:] == ".a3m") ):
     return False
   
   return True
     
-  
+
+
+# simply checks for presence of the last model pkl file (or returns TRUE if asked not to check )  
 def BP_notYetCompleted(args):
   if (args.check_if_completed == False):
     return True
@@ -472,7 +498,7 @@ def BP_archiveMSAs(args):
   # see if there are succesful msas to copy over...
   #  OLD we use the presence of file features.pkl as evidence that msas completed.
   #  OLD this is probably over-stringent in that it only appears after all MSAs are completed.
-  if False #OLD not os.path.isfile(os.path.join(outDir, "features.pkl")):
+  if False: #OLD not os.path.isfile(os.path.join(outDir, "features.pkl")):
     # obsolete chunk here, I know use good looking msa files as sign of completeness
     print ("MSAs appear not to have finished, not copying to msa repository")
     print (os.path.join(outDir, "features.pkl"))
@@ -484,7 +510,7 @@ def BP_archiveMSAs(args):
       chainID = chainIDs[i]
       msaRunDir = os.path.join(outDir, "msas", chainID)
       if not BP_MSACompleted(msaRunDir):
-        print ("MSAs in directory {msaRunDir} appear incomplete, not copying to archive")
+        print (f"MSAs in directory {msaRunDir} appear incomplete, not copying to archive")
         continue
       msaRepoDir = getMSADirectoryForSequence(dimerSeqs[name], args.alignmentRepo)
       if (os.path.isdir(msaRepoDir)):
