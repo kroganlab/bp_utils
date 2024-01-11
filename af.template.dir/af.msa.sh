@@ -10,7 +10,7 @@
 #$ -l scratch=50G
 ##$ -l compute_cap=80,gpu_mem=40G
 
-#$ -t 52,63             ## job array with xx tasks
+#$ -t 1-100             ## job array with xx tasks
 
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}
@@ -29,7 +29,7 @@ export CUDA_VISIBLE_DEVICES=$SGE_GPU
 
 
 
-./AF_saveMSAS.231.v2.py --model_preset=multimer --job_id=$taskID \
+./AF_saveMSAS.231.py --model_preset=multimer --job_id=$taskID \
         --master_fasta=masterFasta.fasta \
         --jobTable=AlphaFoldJobList.csv \
         --prevent_alphafold_output=True
