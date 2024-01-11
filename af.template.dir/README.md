@@ -14,19 +14,11 @@ After setting up the directory (through step 3 above), you will submit several j
 
 ### 1) MSA management
 
-MSA creation is included in the main alphafold python script, but it does not actually benefit from access to a GPU. MSA generation can take hours. so we want the MSA step to run on the more plentiful CPU nodes. Two approaches are possible here.  Submit regular jobs to non-GPU nodes and then kill/let-die the jobs after MSA is complete (edit and submit job script `af.noGPU.sh`).  Or **recommended:**, submit jobs that create a special locked file that will cause alphafold to crash when it tries to write to it upon MSA completion.  This optin is activated in job script `af.msa.sh`.  As above, edit the task numbers in the .sh, then submit with
+MSA creation is included in the main alphafold python script, but it does not actually benefit from access to a GPU. MSA generation can take hours, so we want the MSA step to run on the more plentiful CPU nodes. To limit the jobs to just MSA generation, the script creates a special locked file that will cause alphafold to crash when it tries to write to it upon MSA completion.  This option is activated in job script `af.msa.sh`.  As above, edit the task numbers in the .sh, then submit with
 
 ```
 qsub af.msa.sh
 ```
-
-If instead you opt for the `af.noGPU.sh` script, this command is handy to kill jobs that have already passed the MSA step based on the log files. Note that `af.noaf` should be replaced if you changed the job name in the submission script:
-
-```
-qdel  `grep  "Running model" af.noaf.* | cut -f1 -d":" | sed 's/af.noaf.o//'`
-```
-
-Jobs killed manually will not get a chance to copy their MSA to the MSA repository, so you may want to run `af.postProcess.sh` after "af.noaf.sh" if you don't use `af.msa.sh`
 
   
 ### 2) Jobs that can finish in 2 hours
@@ -44,7 +36,7 @@ qsub af.jobs.sh
 ```
 
 ### 4) For any incomplete jobs (any time after 2 has started), get scores and save MSAs
-If all goes well, this is not necessary, but some times it is good to run separately to extract scores and save MSAs if things go wrong, or to look at already-completed scores before tasks finish for all 5 models.  Edit task array number, then
+If all goes well, this is not necessary, but sometimes it is good to run separately to extract scores and save MSAs if things go wrong, or to look at already-completed scores before tasks finish for all 5 models.  Edit task array number, then
 
 ```
 qsub af.postProcess.sh
