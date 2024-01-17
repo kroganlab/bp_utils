@@ -66,8 +66,8 @@ GetLatestScriptFile <- function(x, scriptName=NULL, include.dirs = FALSE){
   stopifnot (length(filesFound) > 0)
   if (length(filesFound) > 1){
     message ("Multiple files  with matching names found.  Using the last one")
-    print (filesFound)
   }
+  cat (filesFound, "\n")
   return (file.path(dir, tail(filesFound, 1)))
 } 
 
@@ -90,13 +90,18 @@ PDFBackupFileName <- function(prefix = "", subDir = "", suffix = "pdf"){
   return (path)
 }
 
-BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL, openAfter = FALSE){
-  path <- PDFBackupFileName(prefix, subDir)
+BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL, openAfter = FALSE, format = "pdf"){
+  path <- PDFBackupFileName(prefix, subDir, suffix = format)
   if (is.null(dimensions))
     dimensions <- dev.size(units = "in")
   
+  .png <- function(paht, width, height){
+    png(path, width, height, units = "in", res = 200)
+  }
+  .imageFunction <- list(pdf = cairo_pdf, png = .png)[[format]]
+  
   cat (sprintf("Writing image to:  \n%s\n", path))
-  cairo_pdf(path, width = dimensions[1], height = dimensions[2])
+  .imageFunction(path, width = dimensions[1], height = dimensions[2])
   
   # handle functions, my enrichment heatmaps that are part of a list
   if ("function" %in% class(graphics)){
