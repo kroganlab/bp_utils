@@ -46,7 +46,17 @@ GetStringIDMapping.inOrder <- function(ids, stringAliasFile = "/Users/ben/Downlo
   GetStringIDMapping(ids, stringAliasFile)[ids, string, on = "alias"]
 }
 
-
+loadSTRING <- function(stringFile = "/Users/ben/Downloads/9606.protein.links.detailed.v11.5.txt.gz", threshold = 600, namedThresholds = c()){
+  string <- fread (stringFile)
+  string <- string[combined_score > threshold  ]
+  
+  for (name in names(namedThresholds)){
+    string <- string[ string[[name]] > namedThresholds[name],]
+    
+  }
+  
+  string
+}
 
 
 require (igraph)
