@@ -5,7 +5,7 @@ localDir <- getwd()
 
 # uniprot data file ####
 downloadHumanIDDatMap <- function(saveFile = file.path(localDir,"data/human.uniprot.idmap.dat.gz")){
-  human.idmap.dat <- fread ("ftp://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz",
+  human.idmap.dat <- fread ("https://ftp.uniprot.org/pub/databases/uniprot/current_release/knowledgebase/idmapping/by_organism/HUMAN_9606_idmapping.dat.gz",
                             header=FALSE)
   setnames(human.idmap.dat, c("uniprot", "idType", "id"))
   fwrite(human.idmap.dat, file=saveFile)
@@ -313,6 +313,75 @@ loadHumanIDmap<- function(reload=FALSE, path = file.path(localDir,"data/human.un
   fread (path)
 }
 
+# using uniprot web services API ####
+
+myQueryUniprot <- function (query = character(0L),
+                            fields = c("accession", "id"), 
+                            collapse = " OR ",
+                            size= 25, ...) 
+{
+  stopifnot(isCharacter(query), isCharacter(fields))
+  if (!length(query)) 
+    stop("<internal> 'qlist' must be populated with queries")
+  resp <- GET(paste0(UNIPROT_REST_URL, "uniprotkb/search"), 
+              query = list(query = paste(query, collapse = collapse), 
+                           fields = paste(fields, collapse = ","),
+                           format = "tsv",
+                           size = size,
+                           ...))
+  fread(text = content(resp, encoding = "UTF-8"))
+}
+
+
+.query_uniprot_ws_for_species <- function(uniprots){
+  queries <- paste0("accession:", uniprots)
+  res <- setDT(UniProt.ws::queryUniProt(queries, fields = c("accession", "id", "organism_name", "organism_id", "gene_names", "protein_name")))
+  #print (res)
+  res[uniprots,query := Entry , on = "Entry"]
+  res[]
+}
+
+# returns the table, not just species
+uniprotInfoFromWeb <- function(uniprotIDs, chunkSize = 25){
+  print (head(uniprotIDs))
+  uniqueUniprots <- unique(uniprotIDs)
+  
+  chunks <- split(uniqueUniprots, (1:length(uniqueUniprots))%/%chunkSize)
+  
+  speciesMapList <- pbapply::pblapply(chunks, .query_uniprot_ws_for_species)
+  # function(uniprotIDs)
+  #   UniProt.ws::queryUniProt(uniprotIDs, fields = c("accession", "id", "organism_name", "organism_id")))
+  
+  speciesMap <- rbindlist(speciesMapList)
+  return (speciesMap)
+  
+}
+
+speciesFromUniprotID <- function (uniprotIDs, chunkSize = 25){
+  #speciesMap <- UniProt.ws::queryUniProt(unique(uniprotIDs, fields = c("accession", "id", "organism_name", "organism_id")))
+  #setDT[speciesMap]
+  speciesMap <- uniprotInfoFromWS(uniprotIDs)
+  return (speciesMap[uniprotIDs, Organism, on= "Entry"])
+}
+
+
+
+multiSpeciesFromMultiUniprots <- function(uniprots, sep = ";", simplify = TRUE){
+  toSpecies <- data.table(uniprots = unique(uniprots))
+  toSpecies <- toSpecies[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
+  toSpecies[, singleSpecies :=  speciesFromUniprotID(singleUniprot)]
+  if (simplify == TRUE){
+    simplify = function(x)unique(sort(x))
+  }else if (simplify == FALSE){
+    simplify = identity # do nothing
+  }else if (! "function" %in% class (simplify)){
+    stop("unexpected simplify format")
+  }
+  
+  toSpecies <- toSpecies[, .(species = paste(simplify(singleSpecies), collapse = sep)), by = uniprots]
+  
+  return (toSpecies[uniprots, species, by = "uniprots"])
+}
 
 #  using biomart ####
 downloadHumanIDmap.biomart <- function(saveFile = file.path(localDir,"data/human.biomart.idmap.gz")){
@@ -472,6 +541,51 @@ translateUniprot2Something <- function (uniprots, something = "SYMBOL", species 
   return (mapTable$gene)
 }
 
+# do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
+translateSomething2SomethingElse <- function (somethings, originalType = "UNIPROT",  somethingElse = "SYMBOL", species = "HUMAN", fillMissing = FALSE ) {
+  allowedColumns <- AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db)
+  
+  if (!all(c(originalType, somethingElse)%in% allowedColumns) ){
+    message ("Requested unexpected types. Allowed types are: ")
+    print (allowedColumns)
+  }
+
+  somethingsNoNA <- as.character(somethings[!is.na(somethings)])
+  
+  
+  if (species == "HUMAN"){
+    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(somethingsNoNA), somethingElse, originalType, multiVals = "first")
+  }else if (species == "MOUSE"){
+    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(somethingsNoNA), somethingElse, originalType, multiVals = "first")
+  }else if (species == "RAT"){
+    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(somethingsNoNA), somethingElse, originalType, multiVals = "first")
+  } else {
+    stop("unrecognized species", species)
+  }
+  
+  # a change in AnnotationDbi::mapIds (updated Feb 2023) makes it return a list, even when multiVals = "first"
+  # not due to a change in AnnodationDbi::mapIds.  
+  # Some weird behavior with sapply (which I use here and also AnnotationDbi uses), not returning a vector when expected.
+  # solved: it happens when there is a NULL in the list.  sapply(list("a", NULL), identity) does not return a vector
+  # the NULL happens when any of uniprots above is NA.  Should be fixed, lets see...
+  
+  if ("list" %in% class(geneNames)){
+    message ("debugMessage: list returned by AnnotationDbi::mapIds")
+    geneNames <- unlist(sapply(geneNames, function(x)x[[1]]))
+  }
+  
+  
+  mapTable <- unique(data.table(something = names(geneNames), gene = geneNames))
+  setkey(mapTable, something)
+  # this orders all and expands the missing cases
+  mapTable <- mapTable[as.character(somethings)]
+  if(fillMissing == TRUE){
+    # where gene lookup failed, assign the original uniprot
+    mapTable[is.na(gene), gene := something]
+  }
+  return (mapTable$gene)
+}
+
 
 
 translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing = FALSE){
@@ -579,6 +693,8 @@ geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN"){
            aliasTable[alias != symbol & !is.na(symbol), length(alias)],
            " will be replaced with official symbols, and ",
            aliasTable[is.na(symbol), length(alias)], " were not found in alias table") 
+  
+  print (aliasTable[is.na(symbol), unique(alias)])
   
   aliasTable[is.na(symbol), symbol := alias]
   setkey(aliasTable, alias)
