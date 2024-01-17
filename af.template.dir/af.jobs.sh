@@ -29,8 +29,8 @@ export CUDA_VISIBLE_DEVICES=$SGE_GPU
 
 
 ./AF_saveMSAS.231.py --model_preset=multimer --job_id=$taskID \
-	--master_fasta=masterFasta.fasta \    # CHANGE THIS  -- only if you have a differently named fasta file
-	--jobTable=AlphaFoldJobList.csv       # CHANGE THIS  -- only if you have a differently named JobList
+	--master_fasta=masterFasta.fasta \
+	--jobTable=AlphaFoldJobList.csv
 
 t1=$(date --rfc-3339=seconds)
 echo "Duration: $t0 -- $t1"

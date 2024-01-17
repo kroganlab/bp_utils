@@ -58,6 +58,10 @@ def parse_args():
     '--postprocess_job', type = str_to_bool, default = True,
     help = "Disable to skip the job postprocessing (score extraction from pickle files and copying MSA)")
 
+  parser.add_argument(
+          '--check_if_completed', type = str_to_bool, default = True,
+          help = "Check if the run is completed already. If so, don't rerun.")
+
   # /END BP added arguments
 
   parser.add_argument(
@@ -281,16 +285,24 @@ def main():
   print (cmd)
   print()
 
-  from subprocess import run
+  #from subprocess import run
+  import subprocess
   import sys
-  if args.run_alpha_fold:
-    run('module load cuda/11.0 ; %s' % cmd,
-        stdout = sys.stdout, stderr = sys.stderr,
-        shell = True,  # module command is a csh alias on Wynton
-        executable = '/bin/csh',
-        check = True)
+  if args.run_alpha_fold and BP_notYetCompleted(args):
+    try:
+      subprocess.run('module load cuda/11.0 ; %s' % cmd,
+          stdout = sys.stdout, stderr = sys.stderr,
+          shell = True,  # module command is a csh alias on Wynton
+          executable = '/bin/csh',
+          check = True)
+    except subprocess.CalledProcessError as e:
+      print (f"AlphaFold terminated early with error: {e}")
+    
   else:
-    print ("Not running alphafold as requested by run_alpha_fold=False")
+    if not args.run_alpha_fold:
+      print ("Not running alphafold as requested by run_alpha_fold=False")
+    else:
+      print ("Alphafold appears to be completed already, not running")
   
   ########### clean up tasks ###########
   if args.prevent_alphafold_output:
@@ -299,7 +311,7 @@ def main():
   if args.postprocess_job:
     # scores
     BP_processScores(args)  
-   # archive the MSAS
+    # archive the MSAS
     BP_archiveMSAs(args)
   ######################################
 
@@ -325,7 +337,7 @@ def read_fasta(path):
     currentName = ""
     for line in fp.readlines():
       line = line.strip()
-      if line[0] == ">":
+      if line[0:1] == ">":
         currentName = nameFromHeader(line)
         if len(namesInOrder) == 0 or namesInOrder[-1] != currentName:
           namesInOrder.append (currentName)
@@ -362,13 +374,24 @@ def alphaFoldRunOutputDirectory(seq1, seq2, outputPath):
 
 
 def alphaFoldLockFiles (outDir, lock = True):
-  for fn in ("relaxed_model_1_multimer_v3_pred_0.pdb", "result_model_1_multimer_v3_pred_0.pkl", "unrelaxed_model_1_multimer_v3_pred_0.pdb"):
-    fullName = os.path.join(outDir,fn)
-    if not (os.path.isfile(fullName)):
-      with open(fullName, "a") as fp:
-        pass
-    os.chmod(fullName, 0o444)
-  
+  #lockedFiles = ("relaxed_model_1_multimer_v3_pred_0.pdb", "result_model_1_multimer_v3_pred_0.pkl", "unrelaxed_model_1_multimer_v3_pred_0.pdb")
+  lockedFiles =  ("features.pkl",)
+  if lock:
+    for fn in lockedFiles:
+      fullName = os.path.join(outDir,fn)
+      if not (os.path.isfile(fullName)):
+        with open(fullName, "a") as fp:
+          pass
+      print (f"locking file at {fullName} to prevent alphafold from running")
+      os.chmod(fullName, 0o444)
+  else:
+    for fn in lockedFiles:
+      fullName = os.path.join(outDir,fn)
+      if os.path.isfile(fullName):
+        currentPermissions = oct(os.stat(fullName).st_mode & 0o777)
+        print (f"unlocking existing file at {fullName} ({currentPermissions})")
+        os.chmod(fullName, 0o664)
+      
 
 def BP_setupJob(args):
   jobID = args.job_id
@@ -413,15 +436,70 @@ def BP_setupJob(args):
   
   if args.prevent_alphafold_output:
     alphaFoldLockFiles(outDir, lock = True)
+  else:
+    # unlock files that may have been locked previously
+    alphaFoldLockFiles(outDir, lock = False)
+
         
   return fastaPath
+  
+def BP_validStockholmFile(fileName):
+  print (f"checking {fileName}")
+  with open(fileName, "rb") as fp:
+    fp.seek(-8, os.SEEK_END) # last 8 bytes
+    return "//" in str(fp.read())
+#    lastLine = fp.readlines()[-1].strip()
+#    return lastLine == "//"
+
+
+def BP_validA3Mfile(fileName):
+  print (f"checking {fileName}")
+  with open(fileName) as fp:
+    first = fp.readlines()[0].strip()
+    return first[0:1] == ">"
+
+  
+def BP_MSACompleted(msaDir):
+  # 
+  msaFiles = ("bfd_uniref_hits.a3m",
+  "mgnify_hits.sto",
+  "pdb_hits.sto",
+  "uniprot_hits.sto",
+  "uniref90_hits.sto")
+  
+  # all files have to be present
+  if not all([os.path.isfile(os.path.join(msaDir, mf)) for mf in msaFiles]):
+    return False
+    
+  # check .sto files
+  if not all ( (BP_validStockholmFile(os.path.join(msaDir, mf)) for mf in msaFiles if mf[-4:] == ".sto") ):
+    return False
+    
+  # check .a3m files
+  if not all ( (BP_validA3Mfile(os.path.join(msaDir, mf)) for mf in msaFiles if  mf[-4:] == ".a3m") ):
+    return False
+  
+  return True
+    
+
+
+# simply checks for presence of the last model pkl file (or returns TRUE if asked not to check )  
+def BP_notYetCompleted(args):
+  if (args.check_if_completed == False):
+    return True
+  outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
+  if os.path.isfile(os.path.join(outDir, "result_model_5_multimer_v3_pred_0.pkl")):
+    return False 
+  return True
+
 
 def BP_archiveMSAs(args):
   outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
   # see if there are succesful msas to copy over...
-  # we use the presence of file features.pkl as evidence that msas completed.
-  # this is probably over-stringent in that it only appears after all MSAs are completed.
-  if not os.path.isfile(os.path.join(outDir, "features.pkl")):
+  #  OLD we use the presence of file features.pkl as evidence that msas completed.
+  #  OLD this is probably over-stringent in that it only appears after all MSAs are completed.
+  if False: #OLD not os.path.isfile(os.path.join(outDir, "features.pkl")):
+    # obsolete chunk here, I know use good looking msa files as sign of completeness
     print ("MSAs appear not to have finished, not copying to msa repository")
     print (os.path.join(outDir, "features.pkl"))
   else:
@@ -430,8 +508,11 @@ def BP_archiveMSAs(args):
     chainIDs = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     for i,name in enumerate(namesInOrder):
       chainID = chainIDs[i]
-      msaRepoDir = getMSADirectoryForSequence(dimerSeqs[name], args.alignmentRepo)
       msaRunDir = os.path.join(outDir, "msas", chainID)
+      if not BP_MSACompleted(msaRunDir):
+        print (f"MSAs in directory {msaRunDir} appear incomplete, not copying to archive")
+        continue
+      msaRepoDir = getMSADirectoryForSequence(dimerSeqs[name], args.alignmentRepo)
       if (os.path.isdir(msaRepoDir)):
           repoFiles = os.listdir(msaRepoDir)
       else:
