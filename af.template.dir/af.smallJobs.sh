@@ -2,13 +2,14 @@
 #
 #$ -q gpu.q
 #$ -N af.smallJobs   # CHANGE THIS -- any name you want
-#$ -j y               # STDERR and STDOUT should be joined
 #$ -cwd
 #$ -l h_rt=02:00:00
 ###$ -l h_rt=48:00:00
 #$ -l mem_free=60G
 #$ -l scratch=50G
 #$ -l compute_cap=80,gpu_mem=40G
+#$ -j y
+#$ -o jobLogs/$JOB_NAME-$JOB_ID-$TASK_ID.log
 
 #$ -t 1:5            # CHANGE THIS - match numbers in jobTable  ## job array with xx tasks
 
