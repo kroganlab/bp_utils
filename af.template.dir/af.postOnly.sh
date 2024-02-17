@@ -3,7 +3,6 @@
 ##$ -q gpu.q
 #$ -N af.postProcess
 #$ -cwd
-#$ -j y               # STDERR and STDOUT should be joined
 ###$ -l h_rt=24:00:00
 #$ -l h_rt=11:59:00
 #$ -l mem_free=60G
@@ -11,6 +10,9 @@
 ##$ -l compute_cap=80,gpu_mem=40G
 
 ##$ -t 1-67             ## job array with xx tasks
+
+#$ -j y
+#$ -o jobLogs/$JOB_NAME-$JOB_ID.log
 
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}

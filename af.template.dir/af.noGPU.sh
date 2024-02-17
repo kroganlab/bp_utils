@@ -3,12 +3,13 @@
 ##$ -q gpu.q
 #$ -N af.noaf 
 #$ -cwd
-#$ -j y               # STDERR and STDOUT should be joined
 ###$ -l h_rt=24:00:00
 #$ -l h_rt=12:00:00
 #$ -l mem_free=60G
 #$ -l scratch=50G
 ##$ -l compute_cap=80,gpu_mem=40G
+#$ -j y
+#$ -o jobLogs/$JOB_NAME-$JOB_ID-$TASK_ID.log
 
 #$ -t 1-67             ## job array with xx tasks
 

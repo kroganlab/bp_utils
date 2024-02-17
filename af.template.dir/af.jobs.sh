@@ -8,6 +8,8 @@
 #$ -l mem_free=60G
 #$ -l scratch=50G
 #$ -l compute_cap=80,gpu_mem=40G
+#$ -j y
+#$ -o jobLogs/$JOB_NAME-$JOB_ID-$TASK_ID.log
 
 #$ -t 1-90            # CHANGE THIS - match numbers in jobTable  ## job array with xx tasks
 
