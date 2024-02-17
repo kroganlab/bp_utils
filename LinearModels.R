@@ -105,7 +105,7 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
                                               TRUE ~ "")]
     
     # residuals
-    residuals.list <- lapply(lms, function(l)cbind(l$model, data.table(residuals = residuals(l), fitted = fitted(l))))
+    residuals.list <- lapply(lms, function(l)cbind(as.data.table(l$model), data.table(residuals = residuals(l), fitted = fitted(l))))
     residuals.dt <- rbindlist(residuals.list, idcol = "model")
     
     # get all contrasts from emmeans
