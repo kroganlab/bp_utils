@@ -333,6 +333,28 @@ myQueryUniprot <- function (query = character(0L),
 }
 
 
+
+.query_uniprot_ws_for_sequence <- function(uniprots, fields = c("accession","sequence")){
+  queries <- paste0("accession:", uniprots)
+  res <- setDT(UniProt.ws::queryUniProt(queries, fields = fields))
+  #print (res)
+  res[uniprots,query := Entry , on = "Entry"]
+  res[]
+  
+}
+
+uniprotSequencesFromWeb <- function (uniprotIDs, chunkSize = 25, fields = c("accession","sequence")){
+  uniqueUniprots <- unique(uniprotIDs)
+  chunks <- split(uniqueUniprots, (1:length(uniqueUniprots))%/%chunkSize)
+  
+  infoMapList <- pbapply::pblapply(chunks, .query_uniprot_ws_for_sequence, fields = fields)
+
+  infoMap <- rbindlist(infoMapList)
+  return (infoMap)
+  
+}
+
+
 .query_uniprot_ws_for_species <- function(uniprots){
   queries <- paste0("accession:", uniprots)
   res <- setDT(UniProt.ws::queryUniProt(queries, fields = c("accession", "id", "organism_name", "organism_id", "gene_names", "protein_name")))
