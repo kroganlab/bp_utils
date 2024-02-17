@@ -816,16 +816,14 @@ enrichmentAnnotationHeatmap <- function(enrich.dt = data.table (group = c(), pva
   miniGMT <- unique(enrich.dt[term %in% terms & group %in% unique(geneGroups$group), 
                               .(gene = unlist(strsplit(geneID, "/"))),
                               by = .(term) ])
-  go.mat <- dcast (miniGMT[matrixRowOrder, , on = "gene"], # get all genes in table, this will generate an NA column which I clean up below
-                   gene~term, 
-                   fun.aggregate = length)[, `NA` := NULL] |>   
-    as.matrix(rownames = "gene")
+  go.mat <- as.matrix (dcast (miniGMT[matrixRowOrder, , on = "gene"], # get all genes in table, this will generate an NA column which I clean up below
+                              gene~term, 
+                              fun.aggregate = length)[, `NA` := NULL], 
+                       rownames = "gene")
   
   # go pvalue matrix (by gene)
-  p.mat <- dcast (enrich.dt[term %in% terms
-  ][geneGroups, , on = "group", allow.cartesian = TRUE], #
-  gene~term, value.var = "pvalue") |> 
-    as.matrix(rownames = "gene")
+  p.mat <- as.matrix(dcast (enrich.dt[term %in% terms][geneGroups, , on = "group", allow.cartesian = TRUE], #
+                            gene~term, value.var = "pvalue"), rownames = "gene")
   
   # missing values
   if (any(is.na(p.mat))){
