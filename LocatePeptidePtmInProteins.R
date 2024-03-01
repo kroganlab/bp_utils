@@ -390,6 +390,7 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames,
   
   # handle various proteinNames formats 
   if (is.null(modPeptideSequences)){
+    message("likely to break, you've been warned")
     mapper[, c("uniprot", "modPeptide") := tstrsplit(fragPipeProteinName, proteinPepSep)]
   } else{
     mapper[, uniprot := NA_character_]
@@ -467,9 +468,12 @@ fragPipePTMFormat2SiteFormat <- function(proteinNames,
   mapper.expanded[, ptmPos := pepSitePTM + peptideStart -1 ]
   
   # now collapse back to single row per fragPipeProteinName
-  mapper.collapsed <- mapper.expanded[,.(ptmSiteCombo = paste0(uniprot, "_", aaPTM, ptmPos, collapse = ";")), by = fragPipeProteinName]
+  mapper.collapsed <- mapper.expanded[,.(ptmSiteCombo = paste0(uniprot, "_", aaPTM, ptmPos, collapse = ";")), by = .(fragPipeProteinName, modPeptide)]
   
-  return (mapper.collapsed[proteinNames, , on =  "fragPipeProteinName"]$ptmSiteCombo)
+  # this needs to be fixed to handle the Minkyu special format files
+  input.dt <- data.table(fragPipeProteinName = proteinNames, modPeptide = modPeptideSequences)
+  
+  return (mapper.collapsed[input.dt, , on =  c("fragPipeProteinName", "modPeptide")]$ptmSiteCombo)
 }
 
 
