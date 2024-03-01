@@ -1,7 +1,7 @@
 # AlphaFold Jobs Template Directory
 
 ## Simple Usage
-1. Make a copy of this directory
+1. Make a copy of this directory. This copy is your working directory
 2. Make a new `masterFasta.fasta` file (match format to `masterFasta.fasta.example`)
 3. Make a new `AlphaFoldJobList.csv` file (match format to `AlphaFoldJobList.example.csv`)
 4. Edit submission script `af.jobs.sh`, most importantly the number of tasks, but also new file names or job names if desired
@@ -28,6 +28,26 @@ Wynton GPU jobs that take at most 2 hours (set in the shell script) are allowed 
 ```
 qsub af.smallJobs.sh
 ```
+
+### NEW 2.a) 2hr incremental jobs start where 2 hour jobs left off (mostly)
+
+With a modified singularity image, jobs can build starting from the first missing pdb. To do this use the setup\_singularity\_sandbox.sh file to create a new singularity image, then use af.incremental.sh.
+
+```
+cd af.template.dir
+bash setup_singularity_sandbox.sh
+mv ../alphafoldSandbox <someplacePermanent>
+```
+
+
+```
+cd workDir
+# edit af.incremental.sh with path to your alphafoldSandbox
+qsub af.incremental.sh
+```
+
+repeat the above as needed, monitoring how much work is actually getting done. For those jobs where 2 hours is not enough to produce a model (and thus never advance), you will still have to run (3)
+
 
 ### 3) Submit jobs with (mostly) no time limit
 Now we can submit `af.jobs.sh` as in the simple usage above.  Remember to edit the task array number.
