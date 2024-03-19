@@ -48,6 +48,21 @@ qsub af.incremental.sh
 
 repeat the above as needed, monitoring how much work is actually getting done. For those jobs where 2 hours is not enough to produce a model (and thus never advance), you will still have to run (3)
 
+A handy way to submit jobs on wynton is to use job dependencies. In one session you can submit the msa job array and then 5 copies of the incremental af array, each can depend on completion of the corresponding task in the previous job.  Like so:
+
+```
+cd workDir
+qsub af.msa.sh
+# pay attention to the above job id assigned for each qsub
+# and replace each 99999* below with the preceding job ID
+qsub -hold_jid_ad 999991 af.incremental.sh  
+qsub -hold_jid_ad 999992 af.incremental.sh  
+qsub -hold_jid_ad 999993 af.incremental.sh  
+qsub -hold_jid_ad 999994 af.incremental.sh  
+qsub -hold_jid_ad 999995 af.incremental.sh  
+
+```
+`hold_jid_ad` says to hold individual tasks until completion of the corresponding task of the specified job_id.  If instead you use `hold_jid` your whole task array will wait for completion of all tasks of the specified job_id.
 
 ### 3) Submit jobs with (mostly) no time limit
 Now we can submit `af.jobs.sh` as in the simple usage above.  Remember to edit the task array number.
