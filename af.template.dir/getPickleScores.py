@@ -16,7 +16,7 @@ ptms = [dat["ptm"] for dat in allDats]
 iptms = [dat["iptm"] for dat in allDats]
 
 
-with open(outputFile, "w") as fp:
+with open(outputFile, "a") as fp:
     # header
     fp.write (f"model,ptm,iptm\n")
     # data 

@@ -12,7 +12,7 @@
 ##$ -t 1-67             ## job array with xx tasks
 
 #$ -j y
-#$ -o jobLogs/$JOB_NAME-$JOB_ID.log
+#$ -o jobLogs/$JOB_NAME-$JOB_ID-$TASK_ID.log
 
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}
