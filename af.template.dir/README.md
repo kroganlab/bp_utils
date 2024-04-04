@@ -69,6 +69,23 @@ Now we can submit `af.jobs.sh` as in the simple usage above.  Remember to edit t
 ```
 qsub af.jobs.sh
 ```
+Or better, copy and modify the `af.incremental.sh` file to run just those jobs that are incomplete. This command will find the directories in `output` that do not have the 5th relaxed pdb, and write a new `incompleteJobList.csv`:
+
+```
+find output  -mindepth 1 -maxdepth 1 -type d '!' -exec test -e "{}/relaxed_model_5_multimer_v3_pred_0.pdb" ';' -print | sed 's/__/\//' | awk -F"/"   'BEGIN{OFS = ","}{print NR,$2,$3;}' > incompleteJobList.csv
+```
+Then copy and update af.incremental.sh with the new number of tasks (the highest row number in `incompleteJobList.csv`), and make sure to point the af python command at the new `incompleteJobList.csv` file.
+
+```
+./AF_saveMSAS.231.py --model_preset=multimer --job_id=$taskID \
+        --singularity_image=$singularitySandbox \
+        --check_models_complete=True \
+        --master_fasta=masterFasta.fasta \
+        --jobTable=incompleteJobList.csv
+
+```
+
+
 
 ### 4) For any incomplete jobs (any time after 2 has started), get scores and save MSAs
 If all goes well, this is not necessary, but sometimes it is good to run separately to extract scores and save MSAs if things go wrong, or to look at already-completed scores before tasks finish for all 5 models.  Edit task array number, then
