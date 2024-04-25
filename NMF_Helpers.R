@@ -5,18 +5,29 @@
 #' Do a full series of NMFS with multiple iterations at each of several ranks. 
 #' The best nmf result per rank is kept, where best is chosen based on minimum residuals
 doParallelNMF <- function (data.mat, ranks = 1:20, numIterations=24, numProc=12){
+  if (numProc > 1){
+    cl <- parallel::makeCluster(numProc)
+    .lapply <- function(...){
+      parallel::parLapply (cl, ...)
+    }
+  } else{
+    .lapply <- lapply
+    cl <- NULL
+  }
+  
   best.nmfs <- list()
-  cl <- parallel::makeCluster(numProc)
   for (rank in ranks){
     print (sprintf("rank.%02d", rank))
     
-    rep.nmf <- parallel::parLapply (cl, 1:numIterations, function(i, data, rank, .options)NMF::nmf(data, rank, .options = .options),
-                                    data = data.mat, rank = rank, .options = list(parallel = FALSE))
+    rep.nmf <- .lapply (1:numIterations, function(i, data, rank, .options)NMF::nmf(data, rank, .options = .options),
+                        data = data.mat, rank = rank, .options = list(parallel = FALSE))
     
     best.nmf <- rep.nmf[[which.min(sapply (rep.nmf, NMF::residuals))]]
     best.nmfs[[rank]] <- best.nmf
   }
-  parallel::stopCluster(cl)
+  if (!is.null(cl)){
+    parallel::stopCluster(cl)
+  }
   return (best.nmfs)
 }
 
