@@ -62,6 +62,11 @@ def parse_args():
           '--check_if_completed', type = str_to_bool, default = True,
           help = "Check if the run is completed already. If so, don't rerun.")
 
+  parser.add_argument(
+          '--check_models_complete', type = str_to_bool, default = False,
+          help = "Check which models are completed already, and use alternate config files to start from incomplete models"
+  )
+
   # /END BP added arguments
 
   parser.add_argument(
@@ -252,6 +257,16 @@ def main():
       f'--use_precomputed_msas={args.use_precomputed_msas}',
       '--logtostderr',
   ])
+  
+  
+  if args.check_models_complete:
+    startModel = BP_getNextModel(args)
+    if startModel == None:
+      # we appear finished, so don't do any running
+      # to enforce this, set args.check_if_completed to True
+      args.check_if_completed = True
+    else:
+      command_args.extend([f'--startModel={startModel}',]) 
 
   env_vars = {
           'CUDA_VISIBLE_DEVICES': args.gpu_devices,
@@ -271,6 +286,7 @@ def main():
 
   singularity_args = ['singularity',
           'run',
+          '--writable-tmpfs', ## BP Addition to allow for modifying config files pre run ##
           '--nv',  # Use Nvidia container library to use CUDA
           '-B "%s"' % args.mount_data_dir,    # Mount AlphaFold databases
           '-B "/wynton/group/gladstone/users/bpolacco/af.data/databases"',
@@ -491,6 +507,23 @@ def BP_notYetCompleted(args):
   if os.path.isfile(os.path.join(outDir, "result_model_5_multimer_v3_pred_0.pkl")):
     return False 
   return True
+
+def BP_getNextModel(args):
+  testFile = "relaxed_model_{index}_multimer_v3_pred_0.pdb"
+  outDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
+  modelIDs = (1,2,3,4,5)
+  for index in modelIDs:
+    testPath = os.path.join(outDir, testFile.format(index = index))
+    if (not os.path.isfile(testPath)) or os.path.getsize(testPath) == 0:
+      print (f"Didn't find {testPath}")
+      break
+    else:
+      print (f"Found {testPath}")
+  else:
+    # all exist
+    return None
+  return(index)
+
 
 
 def BP_archiveMSAs(args):
