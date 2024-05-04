@@ -115,3 +115,8 @@ scores[, pair := factor(pair, levels = unique(pair[order(-meanIPTM)]))]
 
 ```
 
+Work in progress here, but this is handy for pulling out the useful information from the run logs:
+```
+grep -E "(Running model)|(seed)|(Total JAX model)|(Running monomer pipeline)|(MSA size)|(Total number of templates)"  jobLogs/*
+```
+
