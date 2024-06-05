@@ -372,7 +372,7 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
       message (now(), sprintf(" Calculating per-gene contributions to final heat for %d requested genes", length(genesInContributionsTable)))
     }else{
       sigGenes <- results[pvalue < 0.05,]$gene
-      message (now(), " Calculating per-gene contributions to final heat for genes with p.value < 0.05")
+      message (now(), " Calculating per-gene contributions to final heat for %d genes with p.value < 0.05", length(sigGenes))
     }
     toFromTable <- CalculateContributions (S_matrix, heat.0, sigGenes, networkHeatOnly)
     return(list(results = results, contributions = toFromTable))
@@ -383,6 +383,8 @@ NetworkPropagateS_matrix <- function(S_matrix, geneHeats,numPermutations = 20000
 
 
 CalculateContributions <- function(S_matrix, startHeats, sigGenes, networkHeatOnly){
+  
+  # ther'es some inconsistency here... is startHeats a data.table or a named vector???
   if (length(startHeats) != nrow(S_matrix)){
     duplicates <- startHeats[, .N, by = gene][N > 1, ]$gene
     if(length(duplicates) > 0){
@@ -394,7 +396,7 @@ CalculateContributions <- function(S_matrix, startHeats, sigGenes, networkHeatOn
     
     
   }
-    startHeats <- makeHeat.0(startHeats, fullGenes = rownames(S_matrix))
+    #startHeats <- makeHeat.0(startHeats, fullGenes = rownames(S_matrix))
   
   
   stopifnot (all (names(startHeats) == rownames(S_matrix)))

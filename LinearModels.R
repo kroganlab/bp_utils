@@ -17,7 +17,7 @@ example.emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
 #' @param emmeansFormula  a formula (or other object) passed as second argument to emmeans. It is expected to be
 #'                        used int he context of contrasts so it must produce a $contrasts field in the output
-#'                        examples: emmeansFormula = pairwise~GROUP_ORIGINAL or emmeansFormula = trt.vs.ctrl~GROUP_ORIGINAL
+#'                        examples: emmeansFormula = pairwise~GROUP_ORIGINAL or emmeansFormula = trt.vs.ctrl~GROUP_ORIGINAL or trt.vs.ctrl~timeStr|treatment
 #' @param postProcessFunction  a function that receives an lm and returns a data.table. See example.emmeans.contrastOfContrasts for an example 
 
 linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,

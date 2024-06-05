@@ -1,0 +1,89 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+This template file located at:
+/Applications/RStudio.app/Contents/Resources/resources/templates/notebook_osx.Rmd
+
+```{r}
+library (data.table)
+library (ComplexHeatmap)
+library (ggplot2)
+rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90,vjust = 0.5, hjust=1))
+
+source("../../bp_utils/ManageScriptData.R")
+WriteSessionInfo()
+WriteInstalledPackages()
+```
+
+
+```{r}
+library (biomaRt)
+
+us_mart <- useEnsembl(biomart = "ensembl" ) #, mirror = "uswest"
+
+
+data <- listDatasets(us_mart) |> setDT()
+
+datasets[grep ("uman", description)]
+datasets[grep ("bat", description)]
+
+human <- useMart('ensembl', dataset ="hsapiens_gene_ensembl", host = "https://useast.ensembl.org/")
+
+```
+
+```{r}
+otherSpecies <- useMart('ensembl', dataset = "rferrumequinum_gene_ensembl", host = "https://useast.ensembl.org/")
+```
+
+
+# this shoudl work, but it doesn't
+```{r}
+annot_table <- getLDS(mart = human,
+                      attributes = c("ensembl_gene_id", "external_gene_name", "ensembl_peptide_id", "uniprotswissprot", "uniprotsptrembl"),
+                      
+                      martL = otherSpecies,
+                      attributesL = c("ensembl_gene_id", "external_gene_name", "ensembl_peptide_id", "uniprotswissprot", "uniprotsptrembl"),
+                      verbose = TRUE)
+```
+
+
+# two step process
+homologous gene mappings from a single mart
+```{r}
+uniprotMapping <- getBM(mart = otherSpecies,
+                        attributes = c("ensembl_gene_id", "external_gene_name", "ensembl_peptide_id", 
+                                       "uniprotswissprot", "uniprotsptrembl"))
+
+humanMapping <- getBM(mart = otherSpecies,
+                      attributes =  c("ensembl_gene_id", "external_gene_name", "ensembl_peptide_id",
+                                       "hsapiens_homolog_ensembl_gene", "hsapiens_homolog_associated_gene_name", "hsapiens_homolog_ensembl_peptide",  "hsapiens_homolog_orthology_confidence"))
+
+
+
+
+humanUniprotMapping <- uniprotMapping <- getBM(mart = human,
+                        attributes = c("ensembl_gene_id", "external_gene_name", "ensembl_peptide_id", 
+                                       "uniprotswissprot", "uniprotsptrembl"))
+
+
+setDT(uniprotMapping)
+setDT(humanMapping)
+setDT(humanUniprotMapping)
+
+
+other.withUP <- merge (uniprotMapping, humanMapping, on = "ensembl_gene_id")
+
+
+```
+
+
+
+
+
+
+
+
+
+
+

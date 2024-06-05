@@ -13,10 +13,19 @@ prepareDataForMSStats = function(evidenceFile, keysFile, outfile=NULL){
   
 
   #read evidence and fix a column name
-  ev = fread (evidenceFile)
+  if ("data.table" %in% class(evidenceFile)){
+    ev <- evidenceFile
+  }else{
+    ev = fread (evidenceFile)
+  }
   .fixRawFileColumnName(ev)
+  
   #read keys and fix a column name
-  keys = fread (keysFile)
+  if ("data.table" %in% class(keysFile)){
+    keys <- keysFile
+  } else{
+    keys = fread (keysFile)
+  }
   .fixRawFileColumnName(keys)
   
   #merge

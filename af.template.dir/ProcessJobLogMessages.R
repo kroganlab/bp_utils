@@ -2,7 +2,8 @@ library (data.table)
 
 # relies on R > 4.1 for native pipe operator: |>
 
-main <- function(args = commandArgs(trailingOnly=TRUE)){
+# entry point (see end of file) when run via Rscript
+pjlm.main <- function(args = commandArgs(trailingOnly=TRUE)){
   if (length(args) == 0){
     f <- file("stdin")
     text <- paste0(readLines(f), collapse = "\n")
@@ -15,6 +16,9 @@ main <- function(args = commandArgs(trailingOnly=TRUE)){
   cat (c("Writing output to ", outFile, "\n"))
   fwrite (dt, outFile) # writes to stdout, redirect as needed
 }
+
+
+
 
 
 parseJobMessagesToTable <- function (jobLogPathOrString = "2024_05_03_AF_Jyoti3_data/jobInfo.txt"){
@@ -115,5 +119,9 @@ parseJobMessagesToTable <- function (jobLogPathOrString = "2024_05_03_AF_Jyoti3_
 }
 
 
-main(args = commandArgs(trailingOnly=TRUE))
+# if we are run via RScript, then execute main. 
+# similar to python's idiom if __name__ == "__main__":
+if (sys.nframe() == 0L) {
+  pjlm.main(args = commandArgs(trailingOnly=TRUE))
+}
 
