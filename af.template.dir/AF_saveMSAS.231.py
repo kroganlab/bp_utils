@@ -326,7 +326,8 @@ def main():
 
   if args.postprocess_job:
     # scores
-    BP_processScores(args)  
+    BP_processScores(args)
+    BP_paeForContacts(args)
     # archive the MSAS
     BP_archiveMSAs(args)
   ######################################
@@ -592,6 +593,29 @@ def BP_processScores(args):
       shell = True,  # module command is a csh alias on Wynton
       executable = '/bin/csh',
       check = True)
+
+
+def BP_paeForContacts(args):
+  outputDir = os.path.split(args.fasta_paths)[0] # I store the fasta in the otuput directory:  ./output/A123_B456/A123_B456.fasta
+  import glob
+  pickleFiles = glob.glob(os.path.join(outputDir, "result_*predicted_aligned_error.json"))
+  for pickleFile in pickleFiles:
+    cmd_args = ['Rscript', 'GetContactPAE.R', pickleFile]
+    cmd = ' '.join(cmd_args)
+    print ("\nContact PAE command")
+    print (cmd)
+    print ()
+
+    from subprocess import run
+    import sys
+    try:
+      run(cmd,
+          stdout = sys.stdout, stderr = sys.stderr,
+          shell = True,  # module command is a csh alias on Wynton
+          executable = '/bin/csh',
+          check = True)
+    except:
+      pass
 
 
 

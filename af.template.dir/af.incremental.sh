@@ -16,6 +16,11 @@
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}
 
+# necessary for the GetContactsPAE.R
+module load CBI
+module load r
+
+
 
 # CHANGE THIS to wherever your sandbox singularity image (made by setup_singularity_sandbox.sh) is located
 singularitySandbox="/wynton/home/krogan/bpolacco/gladstoneHome/alphafoldSandbox"

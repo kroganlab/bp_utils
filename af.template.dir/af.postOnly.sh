@@ -9,13 +9,18 @@
 #$ -l scratch=50G
 ##$ -l compute_cap=80,gpu_mem=40G
 
-#$ -t 1-127             ## job array with xx tasks
+#$ -t 1-720             ## job array with xx tasks
 
 #$ -o jobLogs/$JOB_NAME-$JOB_ID-$TASK_ID.log
 #$ -j y
 
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}
+
+
+# necessary for the GetContactsPAE.R
+module load CBI
+module load r
 
 
 

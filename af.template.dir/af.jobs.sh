@@ -16,6 +16,9 @@
 # if not running with sge task array, set to 5
 taskID=${SGE_TASK_ID:-5}
 
+# necessary for the GetContactsPAE.R
+module load CBI
+module load r
 
 
 #
