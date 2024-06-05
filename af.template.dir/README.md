@@ -106,17 +106,35 @@ Then load into R with
 
 ```
 library (data.table)
-scores <- fread ("allScores.csv")
+scores <- unique(fread ("allScores.csv"))
 setnames(scores, c("path", "ptm", "iptm"))
 scores[, pair := tstrsplit(path, "/")[[2]]]
 scores[, meanIPTM := mean(iptm), by = pair]
 scores[, pair := factor(pair, levels = unique(pair[order(-meanIPTM)]))]
-
-
 ```
 
-Work in progress here, but this is handy for pulling out the useful information from the run logs:
+### Extract information from the log files
+
+This is a work in progress, but this is handy for pulling out the useful information from the run logs:
 ```
-grep -E "(Running model)|(seed)|(Total JAX model)|(Running monomer pipeline)|(MSA size)|(Total number of templates)"  jobLogs/*
+grep -E "(Running model)|(seed)|(Total JAX model)|(Running monomer pipeline)|(MSA size)|(Total number of templates)"  jobLogs/* > jobInfo.txt
 ```
 
+Then use the file `ProcessJobLogMessages.R` to create a table of job information.
+
+In R, interactively:
+
+```
+source ("../../bp_utils/af.template.dir/ProcessJobLogMessages.R")
+
+jobInfo <- parseJobMessagesToTable("jobInfo.txt")
+```
+Or with Rscript (replace [...] with location of your bp_utils).
+
+```
+Rscript  [...]/bp_utils/af.template.dir/ProcessJobLogMessages.R jobInfo.txt jobInfo.csv
+```
+You could even pipe to Rscript (experimental). This relies on grep putting the path/filename at the start of each line. 
+```
+grep -E "(Running model)|(seed)|(Total JAX model)|(Running monomer pipeline)|(MSA size)|(Total number of templates)"  jobLogs/* | Rscript  [...]/bp_utils/af.template.dir/ProcessJobLogMessages.R
+```

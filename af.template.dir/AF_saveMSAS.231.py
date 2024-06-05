@@ -39,7 +39,7 @@ def parse_args():
     help = "path to csv formatte file with columns ID, seq1.name, seq2.name")
 
   parser.add_argument(
-    '--alignmentRepo', default  =  "/wynton/group/gladstone/users/bpolacco/AF_msas",
+    '--alignmentRepo', default  =  "/wynton/group/krogan/bpolacco/AF_msas",
     help = "path to directory containing previously generated MSAs")
     
   parser.add_argument(
