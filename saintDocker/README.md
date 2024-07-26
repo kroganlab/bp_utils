@@ -17,12 +17,13 @@ docker build -t bpolacco/saint .
 ```
 
 ### option 2) (easiest) use pre-built docker image from docker hub
-There is a prebuilt image available at docker hub.  You can download it with:
+There is a prebuilt image available at docker hub.  You can download it, and then change its name (tag) with:
 
 ```
 docker pull martingordon808/saint_bp
+
+docker image tag bpolacco/saint  martingordon808/saint_bp
 ```
-Its name is `martingordon808/saint_bp`, so replace the `bpolacco/saint` with that name further below if you use this option.
 
 
 ### verify the build (optional)
