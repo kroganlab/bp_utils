@@ -8,13 +8,22 @@ To run Docker you will first build the image locally, then use the saintDocker.s
 
 ## Usage:
 
-### build the docker iamge
+### option 1) build the docker image
 ```
 # build the docker image within the  saintDocker directory that you downloaded from github
 cd saintDocker
 docker build -t bpolacco/saint . 
 # this will run for a few minutes
 ```
+
+### option 2) (easiest) use pre-built docker image from docker hub
+There is a prebuilt image available at docker hub.  You can download it with:
+
+```
+docker pull martingordon808/saint_bp
+```
+Its name is `martingordon808/saint_bp`, so replace the `bpolacco/saint` with that name further below if you use this option.
+
 
 ### verify the build (optional)
 If it worked you should see the new image in your list of docker images from the command `docker images`:
