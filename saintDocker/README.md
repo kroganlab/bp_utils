@@ -22,7 +22,7 @@ There is a prebuilt image available at docker hub.  You can download it, and the
 ```
 docker pull martingordon808/saint_bp
 
-docker image tag bpolacco/saint  martingordon808/saint_bp
+docker image tag martingordon808/saint_bp bpolacco/saint  
 ```
 
 
