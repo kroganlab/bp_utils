@@ -61,7 +61,10 @@ interChainContacts <- function (pdbFile){
   atomDistance <- as.matrix(dist(atoms[, .(x,y,z)]))
   
   # sweep out row and col radii
-  message (sprintf("Done with distance, now calucating contacts"))
+  message (sprintf("Done with distance, now calculating contacts"))
+
+  # radii copied from Jason Nomburg, line 74 at
+  # https://github.com/jnoms/SAT/blob/main/sat/scripts/struc_detect_interaction.py
   vdw.radii <- c(H =  1.2, C =  1.7, N =  1.55, O =  1.52, S =  1.8)
   atomDistance <- sweep (atomDistance, 1, vdw.radii[atoms$elesy])
   atomDistance <- sweep (atomDistance, 2, vdw.radii[atoms$elesy])
@@ -89,7 +92,6 @@ interChainContacts <- function (pdbFile){
   contactRes[, mmerResnoRow := resnoRow + sum(cl[chain < chainRow, sum(l)]), by = chainRow]
   contactRes[, mmerResnoCol := resnoCol + sum(cl[chain < chainCol, sum(l)]), by = chainCol]
   
-  
   return (contactRes[])  
 }
 
@@ -100,7 +102,6 @@ pae <- jsonlite::fromJSON( paeJsonFile)
 contactRes <- interChainContacts(pdbFile)
 
 contactRes[, pae := pae[mmerResnoRow, mmerResnoCol], by = .(mmerResnoRow, mmerResnoCol)]
-
 
 fwrite (contactRes,file = contactResOutFile)
 

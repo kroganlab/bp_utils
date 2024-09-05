@@ -6,7 +6,11 @@ require (data.table)
 
 GetStringIDMapping <- function (identifiers, 
                                 stringAliasFile = "/Users/ben/Downloads/9606.protein.aliases.v11.5.txt.gz"){
-  aliases <- fread (stringAliasFile)
+  if (!"data.table" %in% class(stringAliasFile)){
+    aliases <- fread (stringAliasFile)
+  }else{
+    aliases <- stringAliasFile
+  }
   message ("There are ", sum (identifiers %in% aliases$alias), " proteins found in string, and ",
            sum (!identifiers %in% aliases$alias), " not in string")
   # attempt to get only the best alias mapping per identifier
@@ -37,6 +41,44 @@ GetStringIDMapping <- function (identifiers,
   goodAliases
 
   }
+
+
+GetGenesFromStringIDs <- function (stringIDs, stringAliasFile = "/Users/ben/Downloads/9606.protein.aliases.v11.5.txt.gz", sources = c("BioMart_HUGO", "Ensembl_UniProt_GN", "Ensembl_EntrezGene", "BLAST_KEGG_NAME_SYNONYM", "Ensembl_UniProt", "BLAST_UniProt_AC"), returnTable = FALSE){
+  uniqueIDs <- unique(stringIDs)
+  aliases <- fread (stringAliasFile)
+  message ("There are ", sum (uniqueIDs %in% aliases$`#string_protein_id`), " stringIDs found in string table, and ",
+           sum (!uniqueIDs %in% aliases$`#string_protein_id`), " not in string table")
+  
+  # as above, but by stringID... may not work..doesn't work.
+  goodAliases <- data.table(string = character(), alias = character())
+  for( source in sources)
+  {
+    topSource <- source
+    if(length(topSource) == 0 ){
+      break
+    }
+    newAliases <- aliases[source == topSource & !`#string_protein_id` %in% goodAliases$string & `#string_protein_id` %in% uniqueIDs, .(string = `#string_protein_id`, alias)]
+    numAliases <- nrow(newAliases)
+    newAliases <- newAliases[, .SD[1], by = string]
+    if (nrow(newAliases) != numAliases)
+      message ("multiple aliases per string IDs found. Taking the first found in the alias table")
+    
+    goodAliases <- rbind (newAliases,
+                          goodAliases)
+    
+    message("Using aliases from ", topSource, " and now have ", nrow(goodAliases), " aliases mapped")
+  }
+  
+  #stringsOI <- unique(goodAliases$string)
+  if(returnTable){
+    return (goodAliases)
+  }else{
+    return (goodAliases[stringIDs, alias, on = "string"]) 
+  }
+  
+}
+
+
 
 
 #' @param ids uniprot, gene names, etc. Anything found in the string aliases file. character

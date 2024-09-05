@@ -6,6 +6,7 @@ library (data.table)
 #' @param groupColumns character vector (>1 allowed) of factor-like columns that defines groups
 #' @param term2gene.gmt the term2gene table.  First two columns (regardless of names) are used as term, gene
 #' @param universe a character vector of gene IDs that define the background universe
+#'                 or a list of character vectors. Names of list must match all values that groupColumns resolves to
 #' @param numProcessors integer. Values > 1 enable multiprocessing
 
 enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("group"),
@@ -23,19 +24,40 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
   subTables <- split (groupTable, by = groupColumns, flatten = TRUE, drop = TRUE)
   
   message ("Computing enrichments on ", length(subTables), " groups defined by ", paste0(groupColumns, collapse = ","))
-  enrichList <-  pbapply::pblapply(subTables, 
-                          function(subDT){
-                            setDT(as.data.frame(clusterProfiler::enricher(unique(subDT[[geneColumn]]),
-                                                         pAdjustMethod="fdr",
-                                                         universe=universe,
-                                                         TERM2GENE =  term2gene.gmt,
-                                                         qvalueCutoff = 1.1,
-                                                         pvalueCutoff = 1.1,
-                                                         ...)))
-                          },
-                          cl=numProcessors)
   
-  enrichTable <-  rbindlist(enrichList, idcol= paste0(groupColumns, collapse = "."))
+  if (! "list" %in% class(universe)){
+    
+    enrichList <-  pbapply::pblapply(subTables, 
+                                     function(subDT){
+                                       setDT(as.data.frame(clusterProfiler::enricher(unique(subDT[[geneColumn]]),
+                                                                                     pAdjustMethod="fdr",
+                                                                                     universe=universe,
+                                                                                     TERM2GENE =  term2gene.gmt,
+                                                                                     qvalueCutoff = 1.1,
+                                                                                     pvalueCutoff = 1.1,
+                                                                                     ...)))
+                                     },
+                                     cl=numProcessors)
+  }else{ # allow for group specific univderse
+    universe = universe[names(subTables)] # enforce order
+    stopifnot (all(names(universe) == names(subTables))) # should fail at line above, but just in case
+    enrichList <-  pbapply::pbmapply(subTables, universe, 
+                                     FUN = function(subDT, univ){
+                                       setDT(as.data.frame(clusterProfiler::enricher(unique(subDT[[geneColumn]]),
+                                                                                     pAdjustMethod="fdr",
+                                                                                     universe=univ,
+                                                                                     TERM2GENE =  term2gene.gmt,
+                                                                                     qvalueCutoff = 1.1,
+                                                                                     pvalueCutoff = 1.1,
+                                                                                     ...)))
+                                     }, SIMPLIFY = FALSE)
+    
+    
+  }
+  
+  groupColumnName <- paste0(groupColumns, collapse = ".")
+  cat ("Group column name in output:", groupColumnName)
+  enrichTable <-  rbindlist(enrichList, idcol= groupColumnName)
   return (enrichTable)
 }
 

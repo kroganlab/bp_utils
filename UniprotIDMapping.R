@@ -320,7 +320,7 @@ myQueryUniprot <- function (query = character(0L),
                             collapse = " OR ",
                             size= 25, ...) 
 {
-  #stopifnot(isCharacter(query), isCharacter(fields))
+  stopifnot(isCharacter(query), isCharacter(fields))
   if (!length(query)) 
     stop("<internal> 'qlist' must be populated with queries")
   resp <- GET(paste0(UNIPROT_REST_URL, "uniprotkb/search"), 
@@ -357,7 +357,7 @@ uniprotSequencesFromWeb <- function (uniprotIDs, chunkSize = 25, fields = c("acc
 
 .query_uniprot_ws_for_species <- function(uniprots){
   queries <- paste0("accession:", uniprots)
-  res <- setDT(UniProt.ws::queryUniProt(queries, fields = c("accession", "id", "organism_name", "organism_id", "gene_primary", "gene_names", "protein_name")))
+  res <- setDT(UniProt.ws::queryUniProt(queries, fields = c("accession", "id", "organism_name", "organism_id", "gene_primary", "gene_names", "protein_name", "length")))
   #print (res)
   res[uniprots,query := Entry , on = "Entry"]
   res[]
