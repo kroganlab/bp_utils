@@ -186,7 +186,15 @@ SaintExpressR.SPC <- function(interactions, baits, preys, pseudoControls = NULL,
   preyStats.treatments[, avgScore := mean(saintScore), by = .(bait, prey)]
   
   # ##### summarize across reps/BFDR ###########
-  bfdr.dt <- preyStats.treatments[, .(avgSpec = mean(spc), treatCounts = paste0(spc, collapse = "|"), avgScore = mean(saintScore), foldChange = mean(foldChange)), by = .(bait, prey, preyGene)]
+  bfdr.dt <- preyStats.treatments[, .(avgSpec = mean(spc),
+                                      treatCounts = paste0(spc, collapse = "|"),
+                                      avgScore = mean(saintScore),
+                                      foldChange = mean(foldChange),
+                                      controlMean = paste0(sprintf("%.1f", controlMean), collapse = "|"),
+                                      controlOmega = unique(controlOmega),
+                                      controlSource = unique(controlSource)
+                                      ),
+                                  by = .(bait, prey, preyGene)]
   
   # inefficient, but an attempt to match the c code which loops over whole table per each row...
   # now replaced with code below for a more efficient implementation.
@@ -205,6 +213,8 @@ SaintExpressR.SPC <- function(interactions, baits, preys, pseudoControls = NULL,
   bfdr.dt[numers, numer := i.numer , on = "denom"]
 
   bfdr.dt[, bfdr := ifelse(denom == 0, 0, 1-numer/denom)]
+  
+  
   
   return (list(controls = preyStats.controls, treatments = preyStats.treatments, bfdr = bfdr.dt, beta1 = beta1))
 }
@@ -261,7 +271,8 @@ optimizeBeta1 <- function (treatments.dt, beta1 = 0.0, lb = -15, ub = 15, print_
   # options to match SaintExpress Stats.cpp::Model_data::wrt_MRF_gamma_0
   opts <- list(
     "algorithm"= "NLOPT_LN_COBYLA",
-    "ftol_abs"= 1.0e-4,  
+    #"ftol_abs"= 1.0e-4,  # takes way too long with very marginal gains
+    "ftol_abs" = 1.0e-2,
     "maxeval"= 1e4,
     "print_level" = print_level
   )
