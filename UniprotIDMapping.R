@@ -639,7 +639,7 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
 
 
 multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE){
-  toGenes <- data.table(uniprots = uniprots)
+  toGenes <- data.table(uniprots = as.character(unique(uniprots)))
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
   toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile)]
   toGenes[is.na(singleGene), singleGene := singleUniprot]
