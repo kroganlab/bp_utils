@@ -95,7 +95,7 @@ BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL, o
   if (is.null(dimensions))
     dimensions <- dev.size(units = "in")
   
-  .png <- function(paht, width, height){
+  .png <- function(path, width, height){
     png(path, width, height, units = "in", res = 200)
   }
   .imageFunction <- list(pdf = cairo_pdf, png = .png)[[format]]
