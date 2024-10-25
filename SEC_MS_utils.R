@@ -173,6 +173,51 @@ reorderMatricesByMaxFraction <- function(mats){
   return (mats)
   
 }
+# Heatmaps ----
+
+intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
+  colorFun <- circlize::colorRamp2(breaks = (0:50)/200, colors = viridis::magma(51,direction = -1))
+  samples <- names(intMats)
+  
+  sample <- samples[1]
+  hml <- Heatmap (intMats[[sample]] ,
+                  name = intensityName,
+                  cluster_rows = FALSE,
+                  row_dend_reorder = FALSE,
+                  cluster_columns = FALSE,
+                  col = colorFun ,
+                  show_row_names = FALSE, 
+                  column_names_gp = gpar(fontsize = 5),
+                  column_labels = ifelse(as.integer(colnames(intMats[[sample]])) %% 5 == 0, colnames(intMats[[sample]]), ""),
+                  column_title = sample,
+                  
+                  #first only:
+                  show_heatmap_legend = TRUE, 
+                  row_title = sprintf ("%d Proteins", nrow(intMats[[sample]]))
+  )
+  
+  # first one gets row title, also gets a legend
+  
+  if (length(intMats) > 1){
+    for (sample in samples[2:length(samples)]){
+      hml <- hml + Heatmap (intMats[[sample]] ,
+                            name = intensityName,
+                            cluster_rows = FALSE,
+                            row_dend_reorder = FALSE,
+                            cluster_columns = FALSE,
+                            col = colorFun ,
+                            show_row_names = FALSE, 
+                            column_names_gp = gpar(fontsize = 5),
+                            column_labels = ifelse(as.integer(colnames(intMats[[sample]])) %% 5 == 0, colnames(intMats[[sample]]), ""),
+                            column_title = sample,
+                            # 
+                            show_heatmap_legend = FALSE)      
+    }
+    
+  }
+  return (hml)
+}
+
 
 # Normalization and Outlier detection by fitting local cubics ----
 
@@ -477,8 +522,13 @@ smoothGuassianKernel <- function(yValues, bandwidth = 2.68){
 
 # Peak detection ----
 
+#' @description
+#' Not updated. Don't use
+#' 
 
 findAllPeaksInLongDT <- function(secLong.dt, intensityColumn = "intensitySmoothed"){
+  message ("This is an old/slow version, probably not updated")
+  
   allFractions <- sort(unique(secLong.dt$fraction))
   stopifnot ("integer" %in% class (allFractions))
   
@@ -622,10 +672,13 @@ boundedDensity <- function(x, bounds = c(-Inf, Inf), bw  = 0.01, cut = 3,...){
 
 # Peak alignment between samples ----
 
-matchTwoPeakTables <- function (peaks.dt, i.peaks.dt){
+#' @description
+#' A utility function to find closest peaks between two peak tables.
+#' 
+matchTwoPeakTables <- function (peaks.dt, i.peaks.dt, matchColumn  = "peakLocation"){
   # define a column to join on to preserve the original columns
-  peaks.dt[, peakJoin := peakLocation]
-  i.peaks.dt[, peakJoin := peakLocation]
+  peaks.dt[, peakJoin := peaks.dt[[matchColumn]] ]
+  i.peaks.dt[, peakJoin := i.peaks.dt[[matchColumn]] ]
   
   # also define a peakID column. this helps to make sure we have a one-to-one mapping in both directions
   peaks.dt[, peakID := paste0(protein, ".", 1:nrow(.SD)), by = protein]
@@ -669,7 +722,14 @@ matchTwoPeakTables <- function (peaks.dt, i.peaks.dt){
 }
 
 
-standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75){
+
+#' @param otherPeaks data.table of peaks (output of `findAllPeaks`) that will adjust to the standard
+#' @param otherPeaks data.table of peaks, as above, that will serve as the standard. These will not be adjusted
+#' @param minPeaksPerFraction required number of good peaks to detect in a fraction to include in fraction alignment
+#'                            Fractions with low counts of peaks may skew the alignment
+#' @param fitPortion Per fraction in otherPeaks, this is the portion of points (around the median) to include in loess fitting.
+#'                   The default, 0.75, means bottom 12.5% and  top 12.5% of values are ignored as they are likely full of outliers. 
+standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75){
   message ("Matching peaks between samples...")
   matchedPeaks <- matchTwoPeakTables (otherPeaks, standardPeaks)
   
@@ -689,6 +749,7 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, minPea
       geom_abline(slope = 1) +
       geom_density_2d() +
       geom_smooth(method = "loess", span = 0.25, se = FALSE, color = "red", lwd = 0.5) +
+      ggtitle(label = sampleName) + 
       theme_bw()
     print (p)
     
@@ -700,9 +761,7 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, minPea
                        span = 0.25)
   
   message ("Adding/updating column cofmN.standardized with standardized peak cofmN")
-  
   otherPeaks[, cofmN.standardized := predict (loess.model, cofmN)]
-  
   
   
   # interpolate the lower tail
@@ -718,34 +777,56 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, minPea
   
   otherPeaks[cofmN < min(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(firstPeak, min(otherRange)), y = c(firstPeak, min(standardRange))) ]
   otherPeaks[cofmN > max(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
-  
+
+  message ("Updating sec.dt with standardFraction for sample ", sampleName)
+  sec.dt[ sample == sampleName, standardFraction := predict (loess.model, fraction)]
+  sec.dt[fraction < min(otherRange) & sample == sampleName, standardFraction := .linearInterpolateY(fraction, xRange = c(firstPeak, min(otherRange)), y = c(firstPeak, min(standardRange)))]
+  sec.dt[fraction > max(otherRange) & sample == sampleName, standardFraction := .linearInterpolateY(fraction, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
+    
   invisible(otherPeaks)
 }
 
 
-cleanPeakJoiningColumns <- function(peakTable){
-  peakTable[, peakJoin := NULL]
-  peakTable[, peakID := NULL]
-}
 
 
-standardizeAllPeakTablesToStandard <- function (allPeakTables, standardIdx = 1, ...){
+#' @param allPeakTables a list of peak tables. One table per SEC sample
+#' @param sec.dt a long data.table of sec data. Required columns are
+#'  * `sample` must match values in `names(allPeakTables)`
+#'  * `protein` must match values in `allPeakTables$protein`
+#'  * `fraction` must match values in `allPeakTables$peakLocation`
+#'  sec.dt will be updated with a `standardFraction` column
+#' @param standardIdx Either an integer or character name identifying which table of allPeakTables to use
+#'                    as the standard that all other tables will be adjusted to.
+#' @param ... arguments passed to `standardizeOnePeakTableToStandard` that does the pairwise adjusting
+#' 
+standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standardIdx = 1, ...){
   if("character" %in% class(standardIdx)){
-    standardIdx = which(names(allPeakTables) == standardIdx)
+    standardIdx <- which(names(allPeakTables) == standardIdx)
   }
   
   standardPeakTable <- allPeakTables[[standardIdx]]
   
   for (i in 1:length(allPeakTables)){
-    if (i == standardIdx)next
+    sampleName <-   names(allPeakTables)[i]
+    if (i == standardIdx){
+      # set standardFraction to actual fraction
+      sec.dt[sample == sampleName, standardFraction := fraction]
+      next
+    }
     message ("Calculating standard peak cofmN for ", names(allPeakTables)[standardIdx])
-    standardizeOnePeakTableToStandard (allPeakTables[[i]], standardPeakTable, ...)
+    standardizeOnePeakTableToStandard (allPeakTables[[i]], standardPeakTable, sec.dt, sampleName, ...)
   }
   
   standardPeakTable[, cofmN.standardized := cofmN] # standard doesn't change
+  
+  .cleanPeakJoiningColumns <- function(peakTable){
+    peakTable[, peakJoin := NULL]
+    peakTable[, peakID := NULL]
+  }
   for (peak.dt in allPeakTables){
     cleanPeakJoiningColumns(peak.dt)
   }
+  invisible(allPeakTables)
 }
 
 
