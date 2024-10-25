@@ -8,6 +8,7 @@ rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90,vjust = 0.5, h
 #' @param secLong.dt a data.table with columns sample (char), fraction (integer), protein (char), intensity (numeric) 
 #' 
 
+# QC ----
 medPolishFractionIntensity <- function(secLong.dt){
   int.mat <- dcast (secLong.dt, protein~sample+fraction, value.var = "intensity") |>
     as.matrix(rownames = "protein")
@@ -26,9 +27,9 @@ medPolishFractionIntensity <- function(secLong.dt){
 
 
 qcSummaryTable <- function(secLong.dt){
-  qcSummary <- secLong.dt[!is.na(intensity) & intensity > 0, 
-                   .(  numProteins = length(unique(protein)),
-                       medIntensity = median(intensity)),
+  qcSummary <- secLong.dt[, 
+                   .(  numProteins = length(unique(protein[!is.na(intensity) & intensity > 0])),
+                       medIntensity = median(intensity[!is.na(intensity) & intensity > 0])),
                    by = .(sample, fraction)]
   
   qcSummary[medPolishFractionIntensity(secLong.dt),
@@ -87,6 +88,8 @@ qcPlotsSecMS <- function(secLong.dt){
 }
 
 
+# scaling ----
+
 
 scaleByTotalIntensity <- function(secLong.dt){
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
@@ -97,9 +100,12 @@ scaleByMaxIntensity <- function(secLong.dt){
   secLong.dt[, intensity_maxScaled := intensity/(max(intensity, na.rm = TRUE)), by= .(sample, protein)]
 }
 
+
+# matrices ----
+
 #' @param scaleDenom total/max. What to use for the denominator for scaled intensity, total=sum(intensity) or max(intensity)
 
-scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total"){
+scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE){
   if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(secLong.dt))
     scaleByTotalIntensity(secLong.dt)
   if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(secLong.dt))
@@ -117,6 +123,14 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total"){
   
   mats <- lapply(split(secLong.dt, secLong.dt$sample), .oneMatrix )
   
+  if (reorder){
+    proteinMaxFractions <- secLong.dt[, .(maxFraction = fraction[which.max(intensity)]), by= .(sample, protein)][, .(meanMaxFraction = mean(maxFraction, na.rm = TRUE)), by = protein]
+    rowOrdering <- proteinMaxFractions[rownames(mats[[1]]), order(meanMaxFraction), on = "protein"]
+    
+    mats <- lapply(mats, function(x)x[rowOrdering,])
+    
+  }
+  
   return (mats)
   
 }
@@ -128,8 +142,36 @@ hclustRowsMultiMatrix <- function(matrixList, check.names = TRUE, ...){
     allSame <- all(apply(name.mat, 1, function(x)1==length(unique(x))))
     stopifnot(allSame)
   }
-  hclust(dist(do.call(cbind, intMats)), ...)
+  hclust(dist(do.call(cbind, matrixList)), ...)
     
+}
+
+#' @param mats a list of matrices or a single matrix, scaled or not doesn't matter.  column-normalized is probably best
+#' @description
+#' Reorders matrices rows based on two statistics: the fraction with the highest intensity, and secondarily the center of mass
+#' When passed a list of matrices, these stats are averaged across all matrices before ordering 
+
+reorderMatricesByMaxFraction <- function(mats){
+  if(!"list" %in% class(mats)){
+    if ("matrix" %in% class(mats)){
+      mats <- list(mats)
+    }else{
+      stop("Expect a list of matrices or a single matrix")
+    }
+  }
+  
+  rowMaxes <- sapply(mats, function(x)apply(x,1, which.max), simplify = "array")
+  avgRowMaxes <- apply(rowMaxes, 1, mean, na.rm = TRUE)
+  
+  centerOfMass <- function(x) sum(x * 1:length(x))/sum(x)
+  rowCenters <- sapply(mats, function(x)apply(x,1, centerOfMass), simplify = "array")
+  avgRowCenters <- apply(rowCenters, 1, mean, na.rm = TRUE)
+  
+  rowOrder <- order (avgRowCenters, avgRowMaxes)
+  
+  mats <- lapply(mats, function(x)x[rowOrder, ])
+  return (mats)
+  
 }
 
 # Normalization and Outlier detection by fitting local cubics ----
@@ -147,8 +189,8 @@ fitLocalCubics<- function (qcSummary,window =15,extend  = 3, sampleTerm = "addit
     
     subData <- fullData[inrange(fraction, startRange, startRange + rangeWidth)]
     l.out <- MASS::rlm( model , data = subData  )
-    subData[, fitted := predict(l.out)]
-    subData[, residual := residuals(l.out)]
+    subData[!is.na(medPolishIntensity), fitted := predict(l.out)]
+    subData[!is.na(medPolishIntensity), residual := residuals(l.out)]
     
     subData[, .(fit = sprintf("localFit.%02d.%02d", rangeWidth, startRange), sample,  fraction, fitted, residual)]
   }
@@ -235,37 +277,475 @@ cosineMatrix <- function(mat){
 } 
 
 
-windowedCosineSimilarity <- function (intensity.mat, window = 15){
+# windowedCosineSimilarity <- function (intensity.mat, window = 15){
+#   intensity.mat[is.na(intensity.mat)] <- 0.0
+#   start <- 1
+#   stop <- ncol(intensity.mat) - (window - 1)
+#   
+#   .doOneWindow <- function (start, intensity.mat, window = 15){
+#     subMat <- intensity.mat[, start:(start + window-1)]
+#     rs <- rowSums(subMat)
+#     rmax <- apply(subMat, 1, which.max)
+#     # limit to those proteins with decent coverage in this window
+#     goodRows <- which( apply( subMat, 1, function(x)sum(x > 0)) > window/2)
+#     goodRows <- intersect(goodRows, which( rs > 0.01)) # more than 1% of protein in window
+#     subMat <- subMat[goodRows,]
+#     
+#     cos.dt <- setDT(reshape2::melt(cosineMatrix(subMat),
+#                                    varnames = c("protein1", "protein2"),
+#                                    value.name = "cosineSim"))[]
+# 
+#     cos.dt <- cos.dt[cosineSim %between% c(0.9, 1.0) & protein1 != protein2] # limit to just the most promising
+#     
+#     rs.dt <- data.table(protein = names(rs), portion = rs)
+#     cos.dt[rs.dt, prot1Portion := i.portion, on = c(protein1 = "protein")]
+#     cos.dt[rs.dt, prot2Portion := i.portion, on = c(protein2 = "protein")]
+#     
+#     rmax.dt <- data.table(protein = names(rmax), max = rmax)
+#     cos.dt[rmax.dt, prot1Max := i.max, on = c(protein1 = "protein")]
+#     
+#     cos.dt[,start := start]
+#     return (cos.dt)
+#   }
+#   
+#   pbapply::pblapply(start:stop, .doOneWindow, intensity.mat, window) |> 
+#     rbindlist()
+# }
+
+#' @param intensity.mat a normalized, but probably not smoothed, SEC matrix
+#' @param goodPeaks.mat a boolean matrix with TRUE identifying a "good peak"
+#' @description
+#' This version filters protein profiles to compare based on presence of a good peak within center +/- peakRadius
+#' It then calculates all-by-all cosine similarities based on profile in center +/- outerRadius 
+#' Only values above 
+
+windowedCosineSimilarity <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, peakRadius = 2){
   intensity.mat[is.na(intensity.mat)] <- 0.0
-  start <- 1
-  stop <- ncol(intensity.mat) - (window - 1)
+  start <- 1 + outerRadius
+  stop <- ncol(intensity.mat) - outerRadius
   
-  .doOneWindow <- function (start, intensity.mat, window = 15){
-    subMat <- intensity.mat[, start:(start + window-1)]
+  
+  .doOneWindow <- function (start, intensity.mat, goodPeaks.mat, outerRadius, peakRadius){
+    rowsWithCentralPeaks <- apply(goodPeaks.mat[, (start - peakRadius):(start + peakRadius)],1,any)
+    subMat <- intensity.mat[rowsWithCentralPeaks, (start-outerRadius):(start + outerRadius)]
+    
     rs <- rowSums(subMat)
-    rmax <- apply(subMat, 1, which.max)
-    # limit to those proteins with decent coverage in this window
-    goodRows <- which( apply( subMat, 1, function(x)sum(x > 0)) > window/2)
-    goodRows <- intersect(goodRows, which( rs > 0.01)) # more than 1% of protein in window
-    subMat <- subMat[goodRows,]
     
     cos.dt <- setDT(reshape2::melt(cosineMatrix(subMat),
                                    varnames = c("protein1", "protein2"),
-                                   value.name = "cosineSim"))[]
-
-    cos.dt <- cos.dt[cosineSim %between% c(0.9, 1.0) & protein1 != protein2] # limit to just the most promising
+                                   value.name = "cosineSim")
+    )[]
+    
+    cos.dt[, obsP := rank(-cosineSim)/.N]
+    cos.dt[, Z := (cosineSim -mean(cosineSim))/sd(cosineSim) ]
+    
+    cos.dt <- cos.dt[cosineSim > 0.9 & protein1 != protein2] # limit to just the most promising
     
     rs.dt <- data.table(protein = names(rs), portion = rs)
     cos.dt[rs.dt, prot1Portion := i.portion, on = c(protein1 = "protein")]
     cos.dt[rs.dt, prot2Portion := i.portion, on = c(protein2 = "protein")]
     
-    rmax.dt <- data.table(protein = names(rmax), max = rmax)
-    cos.dt[rmax.dt, prot1Max := i.max, on = c(protein1 = "protein")]
-    
     cos.dt[,start := start]
+    
+    
+    
+    
     return (cos.dt)
   }
   
-  pbapply::pblapply(start:stop, .doOneWindow, intensity.mat, window) |> 
+  pbapply::pblapply(start:stop, .doOneWindow, intensity.mat, goodPeaks.mat, outerRadius, peakRadius) |> 
     rbindlist()
 }
+
+# Correlation ----
+
+#' @param intensity.mat a normalized, but probably not smoothed, SEC matrix
+#' @param goodPeaks.mat a boolean matrix with TRUE identifying a "good peak"
+#' @param goldStandardInteractome a data table with protein1, protein2 columns listing known interactions.
+#'        If this is not NULL, it will be used to create a per-fraction confidence score.
+#' @description
+#' This version filters protein profiles to compare based on presence of a good peak within center +/- peakRadius
+#' It then calculates all-by-all correlation based on profile in center +/- outerRadius 
+#' Only values above 
+
+windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, peakRadius = 2, goldStandardInteractome = NULL, priorOdds = 0.01){
+  intensity.mat[is.na(intensity.mat)] <- 0.0
+  start <- 1 + outerRadius
+  stop <- ncol(intensity.mat) - outerRadius
+  
+  
+  .doOneWindow <- function (start, intensity.mat, goodPeaks.mat, outerRadius, peakRadius){
+    rowsWithCentralPeaks <- apply(goodPeaks.mat[, (start - peakRadius):(start + peakRadius)],1,any)
+    subMat <- intensity.mat[rowsWithCentralPeaks, (start-outerRadius):(start + outerRadius)]
+    
+    rs <- rowSums(subMat)
+    
+    cor.dt <- setDT(reshape2::melt(cor(t(subMat), use = "pairwise"),
+                                   varnames = c("protein1", "protein2"),
+                                   value.name = "pearsonR")
+    )[]
+    
+    
+    # translate cor to a log distance from 1.0
+    cor.dt[, corScore := -log10(1 - pearsonR)]
+    corScoreRange <- range (cor.dt[is.finite (corScore)]$corScore, na.rm = TRUE)
+    cor.dt[corScore == Inf, corScore := corScoreRange[2] * 1.01]
+
+    if (!is.null(goldStandardInteractome)){
+      # label the known, for interactions in  both directions
+      cor.dt[, knownInteractor := FALSE]
+      cor.dt[goldStandardInteractome, knownInteractor := TRUE, on = c("protein1", "protein2")]
+      cor.dt[goldStandardInteractome, knownInteractor := TRUE, on = c(protein2 = "protein1", protein1 = "protein2")]
+      
+      interactorDensityFun <- density(cor.dt[knownInteractor == TRUE , corScore],  bw = 0.2) |> stats::approxfun()
+      bgDensityFun <-    density(cor.dt[knownInteractor == FALSE, corScore],  bw = 0.2) |> stats::approxfun()
+      
+      cor.dt <- cor.dt[pearsonR > 0.9 & protein1 != protein2] # limit to just the most promising
+      cor.dt[, c("interactorLL", "bgLL") := .(interactorDensityFun(corScore), bgDensityFun(corScore))]
+      cor.dt[, llRatio := interactorLL/bgLL ]
+      cor.dt[, postOdds := llRatio * priorOdds ]
+      cor.dt[, postProb := postOdds/(postOdds + 1) ]
+      cor.dt[, start := start]
+
+      xRange <- c(-1, 16.5)
+      stats.dt <- data.table(start = start, x = seq (from = xRange[1], to = xRange[2], length.out = 512))
+      stats.dt[, c("interactorLL", "bgLL") := .(interactorDensityFun(x), bgDensityFun(x))]
+      stats.dt[, llRatio := interactorLL/bgLL ]
+      stats.dt[, postOdds := llRatio * priorOdds ]
+      stats.dt[, postProb := postOdds/(postOdds + 1) ]
+      
+    }else{
+      cor.dt <- cor.dt[pearsonR > 0.9 & protein1 != protein2] # limit to just the most promising
+      stats.dt <- data.table()
+    }
+    
+    
+    rs.dt <- data.table(protein = names(rs), portion = rs)
+    cor.dt[rs.dt, prot1Portion := i.portion, on = c(protein1 = "protein")]
+    cor.dt[rs.dt, prot2Portion := i.portion, on = c(protein2 = "protein")]
+    
+
+    return ( list(cor = cor.dt, stats = stats.dt))
+  }
+  
+  out.ls <- pbapply::pblapply(start:stop, .doOneWindow, intensity.mat, goodPeaks.mat, outerRadius, peakRadius)
+  
+  cor.dt <- lapply(out.ls, function(x)x$cor) |> rbindlist()
+  stats.dt <- lapply(out.ls, function(x)x$stats) |> rbindlist()
+  
+  return (list (cor = cor.dt, stats = stats.dt))
+  
+}
+
+
+
+# Matrix Smoothing ----
+
+#' @description
+#' Smooths the rows of a matrix using gaussian kernel smoothing, row-wise
+#' @param a matrix to smooth, like a SEC MS matrix. Rows are proteins, columns are equally spaced fractions
+#' @param ... parameters to pass on, most relevantly `bandwidth`. Default bandwidth is 2.68, or SD = 1, same as PCprophet
+#' @value a matrix of same dimensions and as input
+smoothRowsOfMatrix <- function(mat, ...){
+  result <- t(apply(mat, 1, smoothGuassianKernel, ...))
+  colnames(result) <- colnames(mat)
+  return (result)
+}
+
+
+#' @description
+#' Smooth an equally spaced vector of numbers, such as a single SEC profile, a single row of a matrix.
+#' 
+#' Bandwidth effects the amount of smoothing. Wider bandwidths average over more points.
+#' According to ksmooth help, quartiles of the gaussian weights should be +/- bandwidth/4
+#' So 2.68 converts to 0.67, +/- which corresponds to 1st and 3rd quartiles when SD = 1
+#' Thus 2.68 is equivalent to the smoothing in PCprophet.
+#' To verify compare `dnorm(c(-4:4))` # SD = 1, mean = 0
+#' With `ksmooth(1:9, c(0,0,0,0,1,0,0,0,0), n.points = 9, kernel = "normal", bandwidth = 2.68)$y`
+#' 
+smoothGuassianKernel <- function(yValues, bandwidth = 2.68){
+  xValues <- 1:length(yValues)
+  
+  
+  ksmooth(xValues, yValues, n.points = length(yValues),
+          kernel = "normal",
+          bandwidth = bandwidth)$y
+}
+
+
+
+
+# Peak detection ----
+
+
+findAllPeaksInLongDT <- function(secLong.dt, intensityColumn = "intensitySmoothed"){
+  allFractions <- sort(unique(secLong.dt$fraction))
+  stopifnot ("integer" %in% class (allFractions))
+  
+  .replaceNA <- function(x, replace= 0){
+    x[is.na(x)] <- replace
+    return (x)
+  }
+  
+  .findPeaksConsistentReturn <- function(...){
+    value = pracma::findpeaks(...)
+    if(is.null(value)) value <- matrix(c(NA_real_, NA_integer_, NA_integer_, NA_integer_), nrow = 1)
+    return (value)
+  }
+  
+  # a rather complex data.table call here.
+  # basically, we process by looping over all  sample/protein.
+  # we take the subtable (.SD) and expand to allFractions as needed.
+  # replace the NAs with zeros
+  # use pracma::findpeaks, a simple peak detectiong algorithm
+  # convert output to data.table
+  # set meaningful column names
+  
+  # data.table then recombines all .SD together with sample/protein
+  
+  
+  secLong.dt[,.SD[data.table(fraction = allFractions),,on = "fraction"][[intensityColumn]] |> # expand .SD by allFractions, then get just the intensityColumn as specified
+               .replaceNA(0.0) |> 
+               #pracma::findpeaks(nups =2, ndowns = 2) |>
+               .findPeaksConsistentReturn(nups = 2, ndowns = 2) |> 
+               as.data.table() |>
+               setnames(new =  c("peakHeight", "peakLocation", "peakStart", "peakEnd")),
+             by = .(sample, protein)] # loop over all sample/protein
+  
+  
+}
+
+#' faster than the LongDT form
+
+findAllPeaksInSingleMatrix <- function(intMat){
+  if (any(is.na(intMat)))
+    intMat[is.na(intMat)] <- 0.0
+  message ("peak locating...")
+  allPeaks <- apply(intMat, 1, pracma::findpeaks, nups = 2, ndowns = 2 )
+  allPeaks <- rbindlist(lapply(allPeaks, as.data.table), idcol = "protein")
+  setnames(allPeaks, old = c("V1", "V2", "V3", "V4"), new =  c("peakHeight", "peakLocation", "peakStart", "peakEnd"))
+  
+  # center of mass for peaks
+  .cofmCenterN <- function (protein, peakCenter, peakWindow =2 ){
+    fractions <- peakCenter + (-peakWindow:peakWindow)
+    sum(intMat[protein, fractions ] * fractions/sum(intMat[protein, fractions ]))
+  }
+  .cofmFullPeak <- function (protein, peakCenter, start, stop){
+    # in case there is a "lopsided" peak, keep it centered 
+    radius <- min(abs(peakCenter - c(start, stop)))
+    .cofmCenterN(protein, peakCenter, peakWindow = radius)
+  }
+  
+  message ("center of mass calc...")
+  allPeaks[, cofmN := .cofmCenterN(protein, peakLocation), by = .I]
+  allPeaks[, cofmFull := .cofmFullPeak(protein, peakLocation, peakStart, peakEnd), by = .I]
+  message ("...done")
+  
+
+  return(allPeaks)
+}
+
+#' @description
+#' Takes a single sec matrix, smoothed ahead of time, and locates good peaks
+#' Good peaks are defined as:
+#' 1) peak shaped up-up-center-down-down
+#' 2) center > 0.01 intensity (1% of total protein in one fraction, after smoothing)
+#' 3) TBD... a width or sharp increase....
+
+goodPeaksMatrixFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01){
+  stopifnot(!is.null(rownames(intMat)),
+            !is.null(colnames(intMat)))
+  
+  allPeaks <- findAllPeaksInSingleMatrix(intMat)
+  allPeaks[, goodPeak := (peakHeight > minPeakHeight)]
+  
+  #expand allPeaks table to include allProteins and allFractions
+  allProteins <- rownames(intMat)
+  allFractions <- as.integer(colnames(intMat))
+  dummyRows <- data.table(protein = allProteins,
+                          peakLocation = allFractions,
+                          goodPeak = FALSE) |>
+    suppressWarnings() # to ignore warning about recycling with remainder shorter vector
+  
+  #allPeaks <-  rbind(dummyRows, allPeaks, use.names = TRUE, fill = TRUE)
+  
+  # allPeaks <- allPeaks[
+  #   data.table(protein = allProteins)[, .(fraction = allFractions), by = protein],
+  #   , on = c("protein", peakLocation = "fraction")]
+
+  peakMat <- dcast(rbind(dummyRows, allPeaks, use.names = TRUE, fill = TRUE), 
+                   protein~peakLocation, value.var = "goodPeak",
+                   fun.aggregate = any
+  ) |> as.matrix(rownames = "protein")
+  
+
+  peakMat[is.na(peakMat)] <- FALSE
+  
+  return(list(matrix = peakMat[rownames(intMat), colnames(intMat)],
+              table = allPeaks))
+}
+
+# Prob Density Estimation
+
+# based on ggplot's density functions which deal with boundaries nicely.
+
+.reflect_density <- 
+  function (dens, bounds, from, to,...) 
+  {
+    if (all(is.infinite(bounds))) {
+      return(dens)
+    }
+    f_dens <- stats::approxfun(x = dens$x, y = dens$y, method = "linear", 
+                               yleft = 0, yright = 0)
+    left <- max(from, bounds[1])
+    right <- min(to, bounds[2])
+    out_x <- seq(from = left, to = right, length.out = length(dens$x))
+    left_reflection <- f_dens(bounds[1] + (bounds[1] - out_x))
+    right_reflection <- f_dens(bounds[2] + (bounds[2] - out_x))
+    out_y <- f_dens(out_x) + left_reflection + right_reflection
+    list(x = out_x, y = out_y)
+  }
+
+boundedDensity <- function(x, bounds = c(-Inf, Inf), bw  = 0.01, cut = 3,...){
+  
+  from = min(x) - bw * cut
+  to = max(x) + bw *cut
+  
+  
+  
+  dens <- stats::density(x, bw = bw, cut = cut, ...)
+  dens <- .reflect_density(dens = dens, bounds = bounds, from = from, to = to, 
+                           ...)
+  return(dens)
+  
+}
+
+# Peak alignment between samples ----
+
+matchTwoPeakTables <- function (peaks.dt, i.peaks.dt){
+  # define a column to join on to preserve the original columns
+  peaks.dt[, peakJoin := peakLocation]
+  i.peaks.dt[, peakJoin := peakLocation]
+  
+  # also define a peakID column. this helps to make sure we have a one-to-one mapping in both directions
+  peaks.dt[, peakID := paste0(protein, ".", 1:nrow(.SD)), by = protein]
+  i.peaks.dt[, peakID := paste0(protein, ".",1:nrow(.SD)), by = protein]
+  
+  setkey(peaks.dt, protein, peakJoin)
+  setkey(i.peaks.dt, protein, peakJoin)
+  
+  # do the joins in both directions
+  combined <- peaks.dt[i.peaks.dt, roll = "nearest"][!is.na(peakLocation)]
+  revCombined <- i.peaks.dt[peaks.dt, roll = "nearest"][!is.na(peakLocation)]
+  
+  # limit to the matching pairs closest A-B and B-A. Avoids problems of A-BC. (A in one profile, BC in the other) 
+  # This will have B-A and C-A in reverse, but only B-A will be kept. C will be ignored. 
+  peakPairs <- fintersect (combined[, .(peakID, i.peakID)],
+                           revCombined[, .(peakID = i.peakID, i.peakID = peakID)])
+  combined <- combined[peakPairs, on = c("peakID", "i.peakID")]
+  #revCombined <- revCombined[peakPairs, on = c(peakID = "i.peakID", i.peakID = "peakID")]
+  
+  combined[, peakJoin := NULL] # don't need it any longer
+  combined[, deltaPeak := i.peakLocation - peakLocation] 
+  #combined[, i.deltaPeak := peakLocation - i.peakLocation]
+  #revCombined[, peakJoin := NULL] # don't need it any longer
+  #revCombined[, deltaPeak := i.peakLocation - peakLocation] 
+  
+  firstPeakFraction <- min(combined[, c(peakLocation, i.peakLocation)], na.rm = TRUE)
+  lastPeakFraction <- max(combined[, c(peakLocation, i.peakLocation)], na.rm = TRUE)
+  
+  # provide balance at the ends by removing deltaPeaks that are not possible in reverse direction
+  # min peak can only possibly shift positive so there's a bias to large positive
+  combined[deltaPeak > peakLocation-firstPeakFraction, deltaPeak := NA]
+  #revCombined[deltaPeak > peakLocation-firstPeakFraction, deltaPeak := NA]
+  #combined[i.deltaPeak > i.peakLocation-firstPeakFraction, i.deltaPeak := NA]
+  # and max peak can only possibly shift negative so there's a bias to large negative
+  combined[deltaPeak < peakLocation-lastPeakFraction, deltaPeak := NA]
+  #revCombined[deltaPeak < peakLocation-lastPeakFraction, deltaPeak := NA]
+  #combined[i.deltaPeak < i.peakLocation-lastPeakFraction, i.deltaPeak := NA]
+  
+  return (combined)
+  #return(list (forward = combined[], reverse = revCombined[]))
+}
+
+
+standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75){
+  message ("Matching peaks between samples...")
+  matchedPeaks <- matchTwoPeakTables (otherPeaks, standardPeaks)
+  
+  goodFractions <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE, .N, by = peakLocation][N > minPeaksPerFraction, peakLocation]
+  
+  subData <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE][
+    peakLocation %in% goodFractions][
+      ,.SD[i.cofmN %between% quantile(i.cofmN, c( (1-fitPortion)/2, fitPortion + (1-fitPortion)/2))], by = peakLocation] # middle 75% only, or fitPortion
+      
+      #abs(i.cofmN-cofmN) < maxPeakShift]
+  
+  if(doPlots){
+    p <- ggplot (subData, 
+                 aes(x = cofmN, y = i.cofmN)) + 
+      geom_point(alpha = 0.2, shape = ".") + 
+      coord_fixed() + 
+      geom_abline(slope = 1) +
+      geom_density_2d() +
+      geom_smooth(method = "loess", span = 0.25, se = FALSE, color = "red", lwd = 0.5) +
+      theme_bw()
+    print (p)
+    
+  }
+
+  # what is the best i.cofmN(standard) given the cofmN(other)
+  loess.model <- loess(formula = i.cofmN~cofmN, 
+                       data = subData,
+                       span = 0.25)
+  
+  message ("Adding/updating column cofmN.standardized with standardized peak cofmN")
+  
+  otherPeaks[, cofmN.standardized := predict (loess.model, cofmN)]
+  
+  
+  
+  # interpolate the lower tail
+  # a function to do simple two-point linear interpolation
+  .linearInterpolateY <- function (newX, 
+                                   xRange = c(1,5.660036),
+                                   yRange = c(1, 5.228412)){
+    (newX-xRange[1])/(xRange[2] - xRange[1]) * (yRange[2] - yRange[1]) + yRange[1]  
+  }
+  # define the tail boundaries in both spaces:
+  standardRange <- otherPeaks[!is.na(cofmN.standardized), range (cofmN.standardized, na.rm = TRUE)]
+  otherRange <- otherPeaks[!is.na(cofmN.standardized), range (cofmN, na.rm = TRUE)]
+  
+  otherPeaks[cofmN < min(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(firstPeak, min(otherRange)), y = c(firstPeak, min(standardRange))) ]
+  otherPeaks[cofmN > max(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
+  
+  invisible(otherPeaks)
+}
+
+
+cleanPeakJoiningColumns <- function(peakTable){
+  peakTable[, peakJoin := NULL]
+  peakTable[, peakID := NULL]
+}
+
+
+standardizeAllPeakTablesToStandard <- function (allPeakTables, standardIdx = 1, ...){
+  if("character" %in% class(standardIdx)){
+    standardIdx = which(names(allPeakTables) == standardIdx)
+  }
+  
+  standardPeakTable <- allPeakTables[[standardIdx]]
+  
+  for (i in 1:length(allPeakTables)){
+    if (i == standardIdx)next
+    message ("Calculating standard peak cofmN for ", names(allPeakTables)[standardIdx])
+    standardizeOnePeakTableToStandard (allPeakTables[[i]], standardPeakTable, ...)
+  }
+  
+  standardPeakTable[, cofmN.standardized := cofmN] # standard doesn't change
+  for (peak.dt in allPeakTables){
+    cleanPeakJoiningColumns(peak.dt)
+  }
+}
+
+
