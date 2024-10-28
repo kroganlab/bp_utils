@@ -575,10 +575,44 @@ findAllPeaksInSingleMatrix <- function(intMat){
   allPeaks <- rbindlist(lapply(allPeaks, as.data.table), idcol = "protein")
   setnames(allPeaks, old = c("V1", "V2", "V3", "V4"), new =  c("peakHeight", "peakLocation", "peakStart", "peakEnd"))
   
+  renumberFractions <- FALSE
+  # CHECK FRACTION NAMES for unexpected things.
+  # I favor warnings here, though these are probalby errors most of the time
+  # use while as an if that I can break out of
+  while (!is.null(colnames(intMat))){
+    #check for integer colnames
+    fractionNumbers <- as.integer(colnames(intMat))
+    if (any(is.na(fractionNumbers))){
+      warning("Column/fraction names are not integers; will use indexes as fraction numbers")
+      break
+    }
+    # check for integers in order
+    if (!(all(fractionNumbers == sort(fractionNumbers)))){
+      warning ("Column/fraction names as integers are out of order. Ignoring the fraction names and using fraction index(order) as fraction numbers")
+      break
+    }
+    # check for missing fractions by name
+    if (length(fractionNumbers) != 1 + max(fractionNumbers) - min(fractionNumbers) ){
+      stop("Missing fraction(s) ", paste0(setdiff(min(fractionNumbers):max(fractionNumbers), fractionNumbers), collapse = ","))
+    }
+    
+    renumberFractions <- TRUE
+
+    break # only one time through the while-as-if block
+  }
+
+  if(renumberFractions){
+    message ("Using fraction numbers given in intensity matrix ", min(fractionNumbers), "-", max(fractionNumbers)," instead of fraction index 1-", length(fractionNumbers) )
+    allPeaks[, peakLocation := fractionNumbers[peakLocation]]
+    allPeaks[, peakStart := fractionNumbers[peakStart]]
+    allPeaks[, peakEnd := fractionNumbers[peakEnd]]
+  }  
+  
   # center of mass for peaks
   .cofmCenterN <- function (protein, peakCenter, peakWindow =2 ){
     fractions <- peakCenter + (-peakWindow:peakWindow)
-    sum(intMat[protein, fractions ] * fractions/sum(intMat[protein, fractions ]))
+    fractionNames <- as.character(fractions) # as.character to support matrix columns that don't start at 1
+    sum(intMat[protein, fractionNames ] * fractions/sum(intMat[protein, fractionNames ]))
   }
   .cofmFullPeak <- function (protein, peakCenter, start, stop){
     # in case there is a "lopsided" peak, keep it centered 
@@ -591,6 +625,7 @@ findAllPeaksInSingleMatrix <- function(intMat){
   allPeaks[, cofmFull := .cofmFullPeak(protein, peakLocation, peakStart, peakEnd), by = .I]
   message ("...done")
   
+
 
   return(allPeaks)
 }
@@ -806,6 +841,9 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
   
   standardPeakTable <- allPeakTables[[standardIdx]]
   
+  firstPeak <- sec.dt[, min(fraction)]
+  lastPeak  <- sec.dt[, max(fraction)]
+  
   for (i in 1:length(allPeakTables)){
     sampleName <-   names(allPeakTables)[i]
     if (i == standardIdx){
@@ -814,7 +852,7 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
       next
     }
     message ("Calculating standard peak cofmN for ", names(allPeakTables)[standardIdx])
-    standardizeOnePeakTableToStandard (allPeakTables[[i]], standardPeakTable, sec.dt, sampleName, ...)
+    standardizeOnePeakTableToStandard (allPeakTables[[i]], standardPeakTable, sec.dt, sampleName,firstPeak = firstPeak, lastPeak = lastPeak, ...)
   }
   
   standardPeakTable[, cofmN.standardized := cofmN] # standard doesn't change
