@@ -867,4 +867,79 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
   invisible(allPeakTables)
 }
 
+# peak differential statistics ----
+
+clusterPeaks <- function(peakCenters, maxDistance = 2){
+  if (length(peakCenters) <= 1){
+    return (rep(1, length(peakCenters)))
+  }
+  dist(peakCenters, method = "manhattan") |>
+    hclust(method = "complete") |>
+    cutree(h = maxDistance)
+}
+
+
+
+diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
+  lmout <- lm( log2(intensity_totalScaled)~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
+  
+  #onePeakSec.dt[, fitted := 2^predict(lmout)]
+  
+  if (!is.null(doPlotFunction)){
+    fittedCurve <- data.table(treatment = unique(onePeakSec.dt$treatment))[, .(standardFraction = seq(from = min(onePeakSec.dt$standardFraction), to = max(onePeakSec.dt$standardFraction), length = 100)), by = treatment]
+    fittedCurve[, intensity_totalScaled := 2^predict (lmout, newdata = fittedCurve)] 
+    
+    p <- ggplot(onePeakSec.dt, aes(x =standardFraction, y = intensity_totalScaled,color = treatment)) +
+      geom_point(aes(shape = as.factor(replicate))) + 
+      geom_line(aes(color = treatment, group = sample)) +
+      geom_line(data= fittedCurve)
+    
+    if ("function" %in% class(doPlotFunction)){doPlotFunction(p)}else{print(p)}
+    
+  }
+  return (anova(lmout))
+}
+
+
+
+# do the subset per protein ahead of time here
+
+anovaPeaksInOneProtein <- function(sec.dt, peakClusters, radius = 5, ... ){
+
+  anova.tables <- lapply(peakClusters$proteinPeakCluster,
+                         function(clusterID){
+                           peakClusters[clusterID, subsetAndDiffAnova.oneProtein(sec.dt, center, radius = radius, ...)] 
+                           }) |> suppressWarnings()
+
+  allAnova <- rbindlist(anova.tables, idcol = "proteinPeakCluster", fill = TRUE, use.names = TRUE)
+  return (allAnova)
+}
+
+subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
+  stopifnot (length(unique(sec.dt$protein)) == 1) # only intended for one protein
+  onePeak <-  sec.dt[ standardFraction %between% (c(-radius, radius) + peakCenter)]
+  result <- tryCatch( as.data.table(diffAnovaOnePeak(onePeak, ...), keep.rownames = TRUE),
+                      error = function(cond){
+                        return (data.table(error = conditionMessage(cond)))
+                      }
+  )
+  return (result)
+}
+
+
+
+# this is slow on full table, because it has to subset 40K times, or however many peakClusters there are
+# 
+# subsetAndDiffAnova <- function(sec.dt, proteinOI, peakCenter, radius = 5, ...){
+#   onePeak <-  sec.dt[protein == proteinOI  & standardFraction %between% (c(-radius, radius) + peakCenter)]
+#   
+#   
+#   result <- tryCatch( as.data.table(diffAnovaOnePeak(onePeak, ...), keep.rownames = TRUE),
+#                       error = function(cond){
+#                         return (data.table(error = conditionMessage(cond)))
+#                       }
+#   )
+#   return (result)
+# }
+
 
