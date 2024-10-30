@@ -862,10 +862,55 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
     peakTable[, peakID := NULL]
   }
   for (peak.dt in allPeakTables){
-    cleanPeakJoiningColumns(peak.dt)
+    .cleanPeakJoiningColumns(peak.dt)
   }
   invisible(allPeakTables)
 }
+
+# molecular weights by proteins/fractions ----
+
+#' @description
+#' Expected input is two columns that represent fraction number and molecular weight in kildaltons
+#' Regardless of input names, output is titled fraction,mw and `mw` is 1000 * input molecular weight
+#' 
+loadStandardsFractionToMW <- function(path = "~/Downloads/cal_biosep.txt" ){
+  standards  <- fread (path)
+  setnames(standards, c("fraction", "mw"))
+  standards[, mw := mw * 1000] # expect input in kD, convert to D
+  return(standards[])
+}
+
+#' @description
+#' Receives a two column table, First column should be uniprot or other designator of proteins used in the dataset
+#' Second column is a mw in Daltons
+#' 
+loadUniprotToMW <- function(path = "~/Downloads/mw_uniprot_Accession.txt"){
+  proteinMW <- fread (path)
+  setnames(proteinMW, c("protein", "mw"))
+  return (proteinMW[])
+}
+
+
+calculateFractionMassConverters <- function(st){
+  # conversion is based on a simple line log10(mw)~fraction
+  
+  ab <- coefficients(lm(log10(mw)~fraction, data = st))
+  
+  fraction2Mass <- function (fraction){
+    y = ab["(Intercept)"] + ab["fraction"] * fraction
+    mw = 10^y
+    return (mw)
+  }
+  
+  mass2Fraction <- function (mass){
+    fraction = (log10(mass) - ab["(Intercept)"])/ab["fraction"]
+    return (fraction)
+  }
+  
+  return (list(fraction2Mass = fraction2Mass, mass2Fraction = mass2Fraction))
+}
+
+
 
 # peak differential statistics ----
 
