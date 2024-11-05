@@ -413,7 +413,10 @@ windowedCosineSimilarity <- function (intensity.mat, goodPeaks.mat, outerRadius 
 #' It then calculates all-by-all correlation based on profile in center +/- outerRadius 
 #' Only values above 
 
-windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, peakRadius = 2, goldStandardInteractome = NULL, priorOdds = 0.01){
+windowedCorrelation <- function (intensity.mat, goodPeaks.mat,
+                                 outerRadius = 6, peakRadius = 1,
+                                 goldStandardInteractome = NULL,
+                                 priorOdds = 0.01, thresholdR = 0.90){
   intensity.mat[is.na(intensity.mat)] <- 0.0
   start <- 1 + outerRadius
   stop <- ncol(intensity.mat) - outerRadius
@@ -423,6 +426,9 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, 
     rowsWithCentralPeaks <- apply(goodPeaks.mat[, (start - peakRadius):(start + peakRadius)],1,any)
     subMat <- intensity.mat[rowsWithCentralPeaks, (start-outerRadius):(start + outerRadius)]
     
+    peakIdx <- apply(goodPeaks.mat[rowsWithCentralPeaks, (start-peakRadius):(start + peakRadius)],
+                     1,
+                     function(x)match(TRUE, x) )
     rs <- rowSums(subMat)
     
     cor.dt <- setDT(reshape2::melt(cor(t(subMat), use = "pairwise"),
@@ -430,12 +436,13 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, 
                                    value.name = "pearsonR")
     )[]
     
+    cor.dt[, start := start]
     
     # translate cor to a log distance from 1.0
     cor.dt[, corScore := -log10(1 - pearsonR)]
     corScoreRange <- range (cor.dt[is.finite (corScore)]$corScore, na.rm = TRUE)
     cor.dt[corScore == Inf, corScore := corScoreRange[2] * 1.01]
-
+    
     if (!is.null(goldStandardInteractome)){
       # label the known, for interactions in  both directions
       cor.dt[, knownInteractor := FALSE]
@@ -445,12 +452,11 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, 
       interactorDensityFun <- density(cor.dt[knownInteractor == TRUE , corScore],  bw = 0.2) |> stats::approxfun()
       bgDensityFun <-    density(cor.dt[knownInteractor == FALSE, corScore],  bw = 0.2) |> stats::approxfun()
       
-      cor.dt <- cor.dt[pearsonR > 0.9 & protein1 != protein2] # limit to just the most promising
+      cor.dt <- cor.dt[pearsonR > thresholdR & protein1 != protein2] # limit to just the most promising
       cor.dt[, c("interactorLL", "bgLL") := .(interactorDensityFun(corScore), bgDensityFun(corScore))]
       cor.dt[, llRatio := interactorLL/bgLL ]
       cor.dt[, postOdds := llRatio * priorOdds ]
       cor.dt[, postProb := postOdds/(postOdds + 1) ]
-      cor.dt[, start := start]
 
       xRange <- c(-1, 16.5)
       stats.dt <- data.table(start = start, x = seq (from = xRange[1], to = xRange[2], length.out = 512))
@@ -465,9 +471,16 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, 
     }
     
     
+    #
     rs.dt <- data.table(protein = names(rs), portion = rs)
     cor.dt[rs.dt, prot1Portion := i.portion, on = c(protein1 = "protein")]
     cor.dt[rs.dt, prot2Portion := i.portion, on = c(protein2 = "protein")]
+    cor.dt[, log2Ratio := log2(prot1Portion/prot2Portion)]
+    
+    #peakIdx
+    pi.dt <- data.table(protein = names(peakIdx), subIndex = peakIdx)
+    cor.dt[pi.dt, prot1Peak := start - peakRadius -1 + subIndex, on = c(protein1 = "protein")]
+    cor.dt[pi.dt, prot2Peak := start - peakRadius -1 + subIndex, on = c(protein2 = "protein")]
     
 
     return ( list(cor = cor.dt, stats = stats.dt))
@@ -492,6 +505,7 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat, outerRadius = 6, 
 #' @param ... parameters to pass on, most relevantly `bandwidth`. Default bandwidth is 2.68, or SD = 1, same as PCprophet
 #' @value a matrix of same dimensions and as input
 smoothRowsOfMatrix <- function(mat, ...){
+  message ("Smoothing matrix (don't accidentally smooth twice)...")
   result <- t(apply(mat, 1, smoothGuassianKernel, ...))
   colnames(result) <- colnames(mat)
   return (result)
@@ -567,7 +581,8 @@ findAllPeaksInLongDT <- function(secLong.dt, intensityColumn = "intensitySmoothe
 
 #' faster than the LongDT form
 
-findAllPeaksInSingleMatrix <- function(intMat){
+findAllPeaksInSingleMatrix <- function(originalMatrix, ...){
+  intMat <- smoothRowsOfMatrix(originalMatrix, ...)
   if (any(is.na(intMat)))
     intMat[is.na(intMat)] <- 0.0
   message ("peak locating...")
@@ -577,7 +592,7 @@ findAllPeaksInSingleMatrix <- function(intMat){
   
   renumberFractions <- FALSE
   # CHECK FRACTION NAMES for unexpected things.
-  # I favor warnings here, though these are probalby errors most of the time
+  # I favor warnings here, though these are probably errors most of the time
   # use while as an if that I can break out of
   while (!is.null(colnames(intMat))){
     #check for integer colnames
@@ -596,7 +611,8 @@ findAllPeaksInSingleMatrix <- function(intMat){
       stop("Missing fraction(s) ", paste0(setdiff(min(fractionNumbers):max(fractionNumbers), fractionNumbers), collapse = ","))
     }
     
-    renumberFractions <- TRUE
+    if (!(all(fractionNumbers == 1:length(fractionNumbers))))
+      renumberFractions <- TRUE
 
     break # only one time through the while-as-if block
   }
@@ -614,6 +630,7 @@ findAllPeaksInSingleMatrix <- function(intMat){
     fractionNames <- as.character(fractions) # as.character to support matrix columns that don't start at 1
     sum(intMat[protein, fractionNames ] * fractions/sum(intMat[protein, fractionNames ]))
   }
+
   .cofmFullPeak <- function (protein, peakCenter, start, stop){
     # in case there is a "lopsided" peak, keep it centered 
     radius <- min(abs(peakCenter - c(start, stop)))
@@ -622,7 +639,7 @@ findAllPeaksInSingleMatrix <- function(intMat){
   
   message ("center of mass calc...")
   allPeaks[, cofmN := .cofmCenterN(protein, peakLocation), by = .I]
-  allPeaks[, cofmFull := .cofmFullPeak(protein, peakLocation, peakStart, peakEnd), by = .I]
+  #allPeaks[, cofmFull := .cofmFullPeak(protein, peakLocation, peakStart, peakEnd), by = .I]
   message ("...done")
   
 
@@ -630,20 +647,123 @@ findAllPeaksInSingleMatrix <- function(intMat){
   return(allPeaks)
 }
 
+
+
+
+
 #' @description
-#' Takes a single sec matrix, smoothed ahead of time, and locates good peaks
+#' Takes a single sec matrix, NOT smoothed ahead of time, and locates good peaks
+#' First step is to create a smoothed matrix, but it uses the not-smoothed for detection of 'good'
 #' Good peaks are defined as:
 #' 1) peak shaped up-up-center-down-down
 #' 2) center > 0.01 intensity (1% of total protein in one fraction, after smoothing)
-#' 3) TBD... a width or sharp increase....
+#' 3) center N peaks, given by centerRadius, are non-zero and non-missing
+#' 4) a peak with "contrast" determined by coefficient of variation in peaks in varRadius
+#'     this avoids flat peaks but also may exclude those peaks wiht high bases
+#' @return A data.table of peaks with a goodPeak column labeling "goodPeaks"
 
-goodPeaksMatrixFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01){
+goodPeaksTableFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01, centerRadius = 2, varRadius = 4, minCV = 0.2){
+  message("This now expects a not-smoothed matrix. Make sure you are not smoothing ahead of time")
   stopifnot(!is.null(rownames(intMat)),
             !is.null(colnames(intMat)))
   
-  allPeaks <- findAllPeaksInSingleMatrix(intMat)
-  allPeaks[, goodPeak := (peakHeight > minPeakHeight)]
+  allPeaks <- findAllPeaksInSingleMatrix(intMat) # this function does the smoothing
   
+  # detect if fractions around peak are complete (>0, not missing)
+  allPeaks[, 
+           centerComplete := apply(intMat[protein, peakLocation + (-centerRadius:centerRadius)],
+                                   1, function(x)all(x>0)),
+           by = peakLocation]
+  
+  # variance
+  allPeaks[, 
+           var := apply(intMat[protein, 
+                               intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                        1, var, na.rm = TRUE),
+           by = peakLocation]  
+  # mean
+  allPeaks[, 
+           mean := apply(intMat[protein,
+                                intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                         1, mean, na.rm = TRUE),
+           by = peakLocation]  
+  
+  #cv
+  allPeaks[, cv := sqrt(var)/mean]
+  
+  allPeaks[, goodPeak := (peakHeight > minPeakHeight & centerComplete & cv > minCV)]
+  return (allPeaks[])
+}
+
+
+
+goodPeaksMatFromPeaksTable <- function(intMat, allPeaks){ 
+  #create dummy rows that we use to expand allPeaks table to include allProteins and allFractions
+  allProteins <- rownames(intMat)
+  allFractions <- as.integer(colnames(intMat))
+  dummyRows <- data.table(protein = allProteins,
+                          peakLocation = allFractions,
+                          goodPeak = FALSE) |>
+    suppressWarnings() # to ignore warning about recycling with remainder shorter vector
+  
+  peakMat <- dcast(rbind(dummyRows, allPeaks, use.names = TRUE, fill = TRUE), 
+                   protein~peakLocation, value.var = "goodPeak",
+                   fun.aggregate = any
+  ) |> as.matrix(rownames = "protein")
+  
+  peakMat[is.na(peakMat)] <- FALSE
+  
+  return( peakMat[rownames(intMat), colnames(intMat)] )
+}
+
+
+
+
+
+#' @description
+#' Takes a single sec matrix, NOT smoothed ahead of time, and locates good peaks
+#' First step is to create a smoothed matrix, but it uses the not-smoothed for detection of 'good'
+#' Good peaks are defined as:
+#' 1) peak shaped up-up-center-down-down
+#' 2) center > 0.01 intensity (1% of total protein in one fraction, after smoothing)
+#' 3) center N peaks, given by centerRadius, are non-zero and non-missing
+#' 4) a peak with "contrast" determined by coefficient of variation in peaks in varRadius
+#'     this avoids flat peaks but also may exclude those peaks wiht high bases
+
+goodPeaksMatrixFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01, centerRadius = 2, varRadius = 4, minCV = 0.2){
+  warning ("Obsolete function. See goodPeaksTableFromIntensityMatrix")
+  message("This now expects a not-smoothed matrix. Make sure you are not smoothing ahead of time")
+  stopifnot(!is.null(rownames(intMat)),
+            !is.null(colnames(intMat)))
+  
+  allPeaks <- findAllPeaksInSingleMatrix(intMat) # this function does the smoothing
+  
+  # detect if fractions around peak are complete (>0, not missing)
+  allPeaks[, 
+           centerComplete := apply(intMat[protein, peakLocation + (-centerRadius:centerRadius)],
+                                    1, function(x)all(x>0)),
+           by = peakLocation]
+  
+  # variance
+  allPeaks[, 
+           var := apply(intMat[protein, 
+                               intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                                    1, var, na.rm = TRUE),
+           by = peakLocation]  
+  # mean
+  allPeaks[, 
+           mean := apply(intMat[protein,
+                                intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                        1, mean, na.rm = TRUE),
+           by = peakLocation]  
+  
+  #cv
+  allPeaks[, cv := sqrt(var)/mean]
+  
+  allPeaks[, goodPeak := (peakHeight > minPeakHeight & centerComplete & cv > minCV)]
+  
+  
+  # create goodPeak matrix... should really be its own function
   #expand allPeaks table to include allProteins and allFractions
   allProteins <- rownames(intMat)
   allFractions <- as.integer(colnames(intMat))
@@ -665,7 +785,8 @@ goodPeaksMatrixFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01){
   
 
   peakMat[is.na(peakMat)] <- FALSE
-  
+  #/ end createGoodPeakMatrix, probably its own function
+
   return(list(matrix = peakMat[rownames(intMat), colnames(intMat)],
               table = allPeaks))
 }
@@ -890,6 +1011,7 @@ loadUniprotToMW <- function(path = "~/Downloads/mw_uniprot_Accession.txt"){
   return (proteinMW[])
 }
 
+#calculateFractionMassConverters(loadStandardsFractionToMW())
 
 calculateFractionMassConverters <- function(st){
   # conversion is based on a simple line log10(mw)~fraction
