@@ -95,6 +95,8 @@ SaintExpressR.SPC <- function(interactions, baits, preys, pseudoControls = NULL,
   
 
   # ############# treatments - basic stats ###########
+  if ( !nrow(interactions[treatment == "T"]) ) stop("no values in baits$treatment equal \"T\". baits$treatment should distinguish treatment from control with \"T\" and \"C\".")
+  
   if (is.null(pseudoControls)){
     # traditional way is to have a single mean/omega per prey
     preyStats.treatments <- interactions[treatment == "T"][
