@@ -8,6 +8,12 @@ rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90,vjust = 0.5, h
 #' @param secLong.dt a data.table with columns sample (char), fraction (integer), protein (char), intensity (numeric) 
 #' 
 
+summarizeSECTable <- function(secLong.dt){
+  secLong.dt[, .(numFractions = length(unique(fraction)), minFraction = min(fraction), maxFraction = max(fraction), nrow = .N), by = .(treatment, replicate)]
+}
+
+
+
 # QC ----
 medPolishFractionIntensity <- function(secLong.dt){
   int.mat <- dcast (secLong.dt, protein~sample+fraction, value.var = "intensity") |>
@@ -65,7 +71,10 @@ qcPlotMedianInt <- function(qcSummary){
   p <- ggplot (qcSummary, aes(x = fraction, y = log2(medIntensity)))  + 
     geom_line(alpha = 0.5) + 
     geom_point(aes(color = "median")) +
+    
     geom_point(aes(y = medPolishIntensity, color = "median polish"), alpha = 0.5) +
+    geom_line(aes(y = medPolishIntensity, color = "median polish"), alpha = 0.5) + 
+    
     scale_color_manual(values = c(median = "black", `median polish` = "red")) +
     rotate.x.axis.text
   
@@ -186,7 +195,8 @@ intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
                   row_dend_reorder = FALSE,
                   cluster_columns = FALSE,
                   col = colorFun ,
-                  show_row_names = FALSE, 
+                  show_row_names = ifelse(nrow(intMats[[sample]]) > 100, FALSE, TRUE),
+                  row_names_side = "left",
                   column_names_gp = gpar(fontsize = 5),
                   column_labels = ifelse(as.integer(colnames(intMats[[sample]])) %% 5 == 0, colnames(intMats[[sample]]), ""),
                   column_title = sample,
@@ -225,10 +235,18 @@ intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
 #'                   an offset per sample.  This is per window, so different offsets will be used, 
 #'                   and some amount of curve-unique-to-sample persists weven with "additive"
 
-fitLocalCubics<- function (qcSummary,window =15,extend  = 3, sampleTerm = "additive"){
+fitLocalCubics<- function (qcSummary,window =15,extend  = 3,
+                           #choose one:
+                           sampleTerm = c("additive",
+                                          "interaction",
+                                          "interactionByTreatment")[1]){
   additiveModel <-  as.formula ("medPolishIntensity~poly(fraction,3) + sample")
   interactionModel <-     as.formula ("medPolishIntensity~poly(fraction,3) * sample")
-  model <- c(interaction = interactionModel, additive =additiveModel)[[sampleTerm]]
+  interactionByTreatmentModel <- as.formula ("medPolishIntensity~poly(fraction,3) + poly(fraction,3):treatment + sample")
+  
+  model <- c(interaction = interactionModel,
+             additive =additiveModel,
+             interactionByTreatment = interactionByTreatmentModel)[[sampleTerm]]
   
   .doOneLocalCubic <- function( startRange, fullData, rangeWidth){
     
@@ -300,6 +318,11 @@ plotNormAndOutlierFits <- function(qcSummary, allFits){
     geom_point(data = qcSummary, aes(y = medPolishIntensity, color = isOutlier), show.legend = FALSE) +
     theme_bw()
   
+  if ("medianResidual" %in% colnames(qcSummary)){
+    p <- p + geom_point(data = qcSummary, aes(y = medPolishIntensity - medianResidual), color= "grey20", size = 1,show.legend = FALSE)
+  }
+  
+  
   if (all(c("treatment", "replicate")  %in% colnames(allFits)) &
       all(c("treatment", "replicate") %in% colnames(qcSummary))){
     p <- p +  facet_grid(treatment~replicate)
@@ -317,7 +340,8 @@ cosineMatrix <- function(mat){
   # see : https://stats.stackexchange.com/questions/31565/compute-a-cosine-dissimilarity-matrix-in-r
   # Thanks Brad!
   sim <- mat / sqrt(rowSums(mat * mat))
-  sim <- sim %*% t(sim)  
+  sim <- sim %*% t(sim)
+  diag(sim) <- 
   return (sim)
 } 
 
@@ -424,12 +448,20 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat,
   
   .doOneWindow <- function (start, intensity.mat, goodPeaks.mat, outerRadius, peakRadius){
     rowsWithCentralPeaks <- apply(goodPeaks.mat[, (start - peakRadius):(start + peakRadius)],1,any)
-    subMat <- intensity.mat[rowsWithCentralPeaks, (start-outerRadius):(start + outerRadius)]
+    if (length(rowsWithCentralPeaks) <= 1){
+      warning ("For fraction ", start, " only 1 or 0 peaks found.")
+      return ( list(cor = data.table(), stats = data.table()))
+    }
+    subMat <- intensity.mat[rowsWithCentralPeaks, (start-outerRadius):(start + outerRadius), drop = FALSE]
     
-    peakIdx <- apply(goodPeaks.mat[rowsWithCentralPeaks, (start-peakRadius):(start + peakRadius)],
+    peakIdx <- apply(goodPeaks.mat[rowsWithCentralPeaks, (start-peakRadius):(start + peakRadius), drop = FALSE],
                      1,
                      function(x)match(TRUE, x) )
     rs <- rowSums(subMat)
+    
+    if (nrow(subMat) <= 1){
+      return ( list(cor = data.table(), stats = data.table()))
+    }
     
     cor.dt <- setDT(reshape2::melt(cor(t(subMat), use = "pairwise"),
                                    varnames = c("protein1", "protein2"),
@@ -494,6 +526,169 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat,
   return (list (cor = cor.dt, stats = stats.dt))
   
 }
+
+# Gold Standard Interactors/Decoys ----
+
+#' @param genes vector of gene names to limit string to
+#' @param links.path path to string links file, 
+#'                   example https://stringdb-downloads.org/download/protein.physical.links.detailed.v12.0/9606.protein.physical.links.detailed.v12.0.txt.gz
+#' @param info.path path to string file with gene name etc info
+#'                  example https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz
+#' @param combinedScoreThreshold only edges with combined score above this will be considered
+#' @param stringDistThreshold protein pairs greater distance than this will be called a decoy
+#' @param geneAliasFunction a function that will convert a list of genes to the canonical alias
+#'                          `function(charGeneVector){... return(charGeneAliasVector)}`
+#'                          The default, `identity`, is no conversion
+#'                          See function `github/kroganlab/bp_utils/UniprotIDMapping.R :: geneAlias2officialGeneSymbol` as an example/possible
+decoysFromString <- function (genes, 
+                              links.path = "~/Downloads/9606.protein.physical.links.detailed.v12.0.txt.gz",
+                              info.path = "~/Downloads/9606.protein.info.v12.0.txt.gz",
+                              combinedScoreThreshold = 600,
+                              stringDistThreshold = 5,
+                              geneAliasFunction = identity){
+  genes <- unique(genes)
+  # remove KRT contaminants
+  genes <- grep("^KRT", genes, invert = TRUE, value = TRUE)
+  
+  
+  string <- fread (links.path)
+  string <- string[combined_score > combinedScoreThreshold  ]
+  
+  
+  proteinNames <- fread (info.path)
+  string[proteinNames, gene1 := i.preferred_name , on = c(protein1 = "#string_protein_id")]
+  string[proteinNames, gene2 := i.preferred_name , on = c(protein2 = "#string_protein_id")]
+  
+  string[, alias1 := geneAliasFunction(gene1)]
+  string[, alias2 := geneAliasFunction(gene2)]
+  g <- igraph::graph_from_data_frame(string[, .(alias1, alias2)], directed = FALSE)
+  # find distant genes in string
+  rm.na <- function(x)x[!is.na(x)]
+  dists <- igraph::distances(g, 
+                             rm.na (match( genes, names(V(g)))),
+                             rm.na (match( genes, names(V(g)))))
+  distantGenes <- which(dists > stringDistThreshold, arr.ind = TRUE) |> as.data.table(keep.rownames = TRUE)
+  # distantGenes is a data.table with columns rn, row, col. 
+  # row and col are indeces to dimensions of dists matrix
+  setnames(distantGenes, old = "rn", new = "gene1")
+  distantGenes[, gene2 := colnames(dists)[col]]
+  
+  decoys <- unique(distantGenes[gene1 < gene2, .(gene1, gene2)])
+  return (decoys)
+}
+
+scoreByGS <- function (sub.dt, denomDecoy, denomInteractor, column = "meanLL", groupByVariable = "treatment", pseudoCount = 1){
+  # we need an encoding of gs levels so we can make decoy or interactor first:
+  gsOtherLevels <- setdiff(unique(sub.dt$gs), c("decoy", "interactor"))
+  sub.dt[, gs := factor(gs, levels = c("decoy", gsOtherLevels, "interactor"))]
+  
+  message ("Counting and scoring decoys...")
+  setorderv(sub.dt, c(column, "gs"), order = c(-1, 1))
+  
+  sub.dt[, decoyCount := 0L]
+  sub.dt[gs == "decoy", decoyCount := frankv(.SD,  column, order = -1, ties.method = "max"), by = eval(groupByVariable)]
+  sub.dt[, decoyCount := cummax(decoyCount), by = eval(groupByVariable)] # requires decoy before others at same score, to copy count to other labeled data at same score
+  sub.dt[, decoyCount := decoyCount + pseudoCount]
+  sub.dt[, log10DecoyRate := log10(decoyCount) - log10(denomDecoy)]
+  
+  # reorder the gs labels, interactor before decoy
+  message ("Counting and scoring interactors...")
+  setorderv(sub.dt, c(column, "gs"), order = c(-1, -1))
+  sub.dt[, interactorCount := 0L]
+  sub.dt[gs == "interactor", interactorCount := frankv(.SD, cols = column, order = -1, ties.method = "max"), by = eval(groupByVariable)]
+  sub.dt[, interactorCount := cummax(interactorCount), by = eval(groupByVariable)] # # requires interactor before others at same score, to copy count to other labeled data at same score
+  sub.dt[, interactorCount := pseudoCount + interactorCount]
+  sub.dt[, log10IntRate := log10(interactorCount) - log10(denomInteractor)]
+  
+  sub.dt[is.infinite(log10DecoyRate), log10DecoyRate := NA]
+  sub.dt[is.infinite(log10IntRate), log10IntRate := NA]
+  
+  
+  message ("Calculating ratios per score ", column, " ...")
+  
+  # ratios
+  sub.dt[, log10RateRatioID := max(log10IntRate, na.rm = TRUE) -  max(log10DecoyRate, na.rm = TRUE), 
+         by= c(eval(column), eval(groupByVariable))] #highest recovery at each value of score
+
+  # take care of likelihood ratio apparently shrinking due to low numbers of itneractors at high scores
+  # ... we expect ratio likelihood only increase as threshold increases
+  #reverse order to increasing by score column
+  setorderv(sub.dt, column, 1)
+  sub.dt[, log10RateRatioID := cummax(log10RateRatioID), by = eval(groupByVariable)]
+  
+  #reverse back
+  setorderv(sub.dt, column, -1)
+}
+
+
+#' @param genes vector of gene names to limit results to
+#' @param corum.path path to corum file
+#' 
+#' @param string.links.path path to string links file, 
+#'                   example https://stringdb-downloads.org/download/protein.physical.links.detailed.v12.0/9606.protein.physical.links.detailed.v12.0.txt.gz
+#' @param string.info.path path to string file with gene name etc info
+#'                  example https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz
+#' @param combinedScoreThreshold only edges with combined score above this will be considered
+#' @param geneAliasFunction a function that will convert a list of genes to the canonical alias
+#'                          `function(charGeneVector){... return(charGeneAliasVector)}`
+#'                          The default, `identity`, is no conversion
+#'                          See function `github/kroganlab/bp_utils/UniprotIDMapping.R :: geneAlias2officialGeneSymbol` as an example/possible
+
+goldStandardPairs <- function (genes,
+                               corum.path = "~/Downloads/corum_humanComplexes.txt",
+                               string.links.path = "~/Downloads/9606.protein.physical.links.detailed.v12.0.txt.gz",
+                               string.info.path = "~/Downloads/9606.protein.info.v12.0.txt.gz",
+                               stringCombinedScoreThreshold = 600,
+                               geneAliasFunction = identity){
+  
+  genes <- unique(genes)
+  # remove KRT contaminants
+  genes <- grep("^KRT", genes, invert = TRUE, value = TRUE)
+  
+  #corum
+  corumPairs <- unique(corumPairs(corum.path, geneAliasFunction)[, .(gene1, gene2)])
+
+  # string
+  string <- fread (string.links.path)
+  string <- string[combined_score > stringCombinedScoreThreshold  ]
+  
+  
+  proteinNames <- fread (string.info.path)
+  string[proteinNames, gene1 := i.preferred_name , on = c(protein1 = "#string_protein_id")]
+  string[proteinNames, gene2 := i.preferred_name , on = c(protein2 = "#string_protein_id")]
+  
+  string[, alias1 := geneAliasFunction(gene1)]
+  string[, alias2 := geneAliasFunction(gene2)]
+  
+  stringPairs <- string[alias1 < alias2, .(gene1 = alias1, gene2 = alias2)]
+  
+  combinedPairs <- rbindlist( list(corum = corumPairs,
+                                   string = stringPairs),
+                              idcol = 'source'
+  )[
+    , .(source = paste0(source, collapse = ";")),
+    by = .(gene1, gene2)]
+  
+  return (combinedPairs[gene1 %in% genes & gene2 %in% genes])
+  
+}
+
+#' returns complex id and name together with gene1, gene2
+corumPairs <- function(corum.path = "~/Downloads/corum_humanComplexes.txt",
+                       geneAliasFunction = identity){
+  # corum
+  corum <- fread (corum.path)
+  .allByAll <- function(genes){
+    data.table(gene1 = genes)[, .(gene2 = genes), by = gene1][]
+  }
+  corumPairs <- corum[, .allByAll(unlist(strsplit(subunits_gene_name, ";"))), by = .(complex_id, complex_name)]
+  corumPairs[, alias1 := geneAliasFunction(gene1)]
+  corumPairs[, alias2 := geneAliasFunction(gene2)]
+  
+  corumPairs <- unique(corumPairs[alias1 < alias2, .(gene1 = alias1, gene2 = alias2, complex_id, complex_name)])
+  return(corumPairs)
+}
+
 
 
 
@@ -631,6 +826,30 @@ findAllPeaksInSingleMatrix <- function(originalMatrix, ...){
     sum(intMat[protein, fractionNames ] * fractions/sum(intMat[protein, fractionNames ]))
   }
 
+  # kernel-based peak center
+  
+  .cofmKernel <- function (protein, peakCenter, start, stop){
+    radius <- min(abs(peakCenter - c(start, stop)))
+    fractions <- peakCenter + (-radius:radius)
+    fractionNames <- as.character(fractions) # as.character to support matrix columns that don't start at 1
+    
+    # we use half the bandwidth of the original smoothing
+    # this prevents large peak shifts when a peak is a shoulder of another peak
+    kernel <- ksmooth(x = fractions, y = intMat[protein, fractionNames ],
+                      kernel = "normal", bandwidth =  1.34,
+                      x.points = seq(from = peakCenter-radius,
+                                     to = peakCenter + radius,
+                                     by = 0.01))
+    result <- kernel$x[which.max(kernel$y)]
+    # # debugging:
+    # proteinOI <- protein
+    # if (abs(allPeaks[protein == proteinOI & peakStart == start & peakEnd == stop]$peakLocation - result) > 1){
+    #   message ("trouble")
+    # }
+    # # end debugging
+    return (result)
+  }
+  
   .cofmFullPeak <- function (protein, peakCenter, start, stop){
     # in case there is a "lopsided" peak, keep it centered 
     radius <- min(abs(peakCenter - c(start, stop)))
@@ -639,7 +858,12 @@ findAllPeaksInSingleMatrix <- function(originalMatrix, ...){
   
   message ("center of mass calc...")
   allPeaks[, cofmN := .cofmCenterN(protein, peakLocation), by = .I]
+  
+  # inaccurate when peak is lopsided:
   #allPeaks[, cofmFull := .cofmFullPeak(protein, peakLocation, peakStart, peakEnd), by = .I]
+  
+  # accurate but slow:
+  #allPeaks[, cofmKernel := .cofmKernel(protein, peakLocation, peakStart, peakEnd), by = .I]
   message ("...done")
   
 
@@ -671,20 +895,23 @@ goodPeaksTableFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01, cen
   
   # detect if fractions around peak are complete (>0, not missing)
   allPeaks[, 
-           centerComplete := apply(intMat[protein, peakLocation + (-centerRadius:centerRadius)],
+           centerComplete := apply(intMat[protein, peakLocation + (-centerRadius:centerRadius),
+                                           drop = FALSE],
                                    1, function(x)all(x>0)),
            by = peakLocation]
   
   # variance
   allPeaks[, 
            var := apply(intMat[protein, 
-                               intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                               intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius)),
+                               drop= FALSE],
                         1, var, na.rm = TRUE),
            by = peakLocation]  
   # mean
   allPeaks[, 
            mean := apply(intMat[protein,
-                                intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius))],
+                                intersect(1:ncol(intMat), peakLocation + (-varRadius:varRadius)),
+                                drop = FALSE],
                          1, mean, na.rm = TRUE),
            by = peakLocation]  
   
@@ -885,11 +1112,18 @@ matchTwoPeakTables <- function (peaks.dt, i.peaks.dt, matchColumn  = "peakLocati
 #'                            Fractions with low counts of peaks may skew the alignment
 #' @param fitPortion Per fraction in otherPeaks, this is the portion of points (around the median) to include in loess fitting.
 #'                   The default, 0.75, means bottom 12.5% and  top 12.5% of values are ignored as they are likely full of outliers. 
-standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75){
+standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75, startFitAtPeak = 15){
   message ("Matching peaks between samples...")
   matchedPeaks <- matchTwoPeakTables (otherPeaks, standardPeaks)
   
+  # # barplots of matchedPeaks per fraction
+  # if (doPlots){
+  #   p <- ggplot(matchedPeaks, aes(x = peakLocation)) + geom_bar() + ggtitle(label = sprintf("%s Matched Peaks ", sampleName))
+  #   print (p)
+  # }
+  
   goodFractions <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE, .N, by = peakLocation][N > minPeaksPerFraction, peakLocation]
+  goodFractions <- goodFractions[goodFractions > startFitAtPeak]
   
   subData <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE][
     peakLocation %in% goodFractions][
@@ -969,7 +1203,7 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
     sampleName <-   names(allPeakTables)[i]
     if (i == standardIdx){
       # set standardFraction to actual fraction
-      sec.dt[sample == sampleName, standardFraction := fraction]
+      sec.dt[sample == sampleName, standardFraction := as.double(fraction)]
       next
     }
     message ("Calculating standard peak cofmN for ", names(allPeakTables)[standardIdx])
@@ -994,8 +1228,8 @@ standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standard
 #' Expected input is two columns that represent fraction number and molecular weight in kildaltons
 #' Regardless of input names, output is titled fraction,mw and `mw` is 1000 * input molecular weight
 #' 
-loadStandardsFractionToMW <- function(path = "~/Downloads/cal_biosep.txt" ){
-  standards  <- fread (path)
+loadStandardsFractionToMW <- function(path = "~/Downloads/cal_biosep.txt", ...){
+  standards  <- fread (path, ...)
   setnames(standards, c("fraction", "mw"))
   standards[, mw := mw * 1000] # expect input in kD, convert to D
   return(standards[])
@@ -1049,17 +1283,21 @@ clusterPeaks <- function(peakCenters, maxDistance = 2){
 
 diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
   lmout <- lm( log2(intensity_totalScaled)~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
+  lmout.noInteraction <- lm( log2(intensity_totalScaled)~ poly(standardFraction, 4)+treatment, onePeakSec.dt)
   
   #onePeakSec.dt[, fitted := 2^predict(lmout)]
   
   if (!is.null(doPlotFunction)){
     fittedCurve <- data.table(treatment = unique(onePeakSec.dt$treatment))[, .(standardFraction = seq(from = min(onePeakSec.dt$standardFraction), to = max(onePeakSec.dt$standardFraction), length = 100)), by = treatment]
     fittedCurve[, intensity_totalScaled := 2^predict (lmout, newdata = fittedCurve)] 
+    fittedCurve[, intensity_totalScaled.noInteraction := 2^predict (lmout.noInteraction, newdata = fittedCurve)] 
     
     p <- ggplot(onePeakSec.dt, aes(x =standardFraction, y = intensity_totalScaled,color = treatment)) +
       geom_point(aes(shape = as.factor(replicate))) + 
       geom_line(aes(color = treatment, group = sample)) +
-      geom_line(data= fittedCurve)
+      geom_line(data= fittedCurve, lwd = 1.5, alpha = .5) +
+      geom_line(data = fittedCurve, lwd = 1, lty = "dashed", mapping = aes(y =intensity_totalScaled.noInteraction )) + 
+      theme_bw()
     
     if ("function" %in% class(doPlotFunction)){doPlotFunction(p)}else{print(p)}
     
@@ -1072,7 +1310,6 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
 # do the subset per protein ahead of time here
 
 anovaPeaksInOneProtein <- function(sec.dt, peakClusters, radius = 5, ... ){
-
   anova.tables <- lapply(peakClusters$proteinPeakCluster,
                          function(clusterID){
                            peakClusters[clusterID, subsetAndDiffAnova.oneProtein(sec.dt, center, radius = radius, ...)] 
@@ -1083,7 +1320,10 @@ anovaPeaksInOneProtein <- function(sec.dt, peakClusters, radius = 5, ... ){
 }
 
 subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
-  stopifnot (length(unique(sec.dt$protein)) == 1) # only intended for one protein
+  stopifnot (length(unique(sec.dt$protein)) <= 1) # only intended for one protein
+  if (length(unique(sec.dt$protein)) == 0){
+    return(data.table(error = "No data for protein"))
+  }
   onePeak <-  sec.dt[ standardFraction %between% (c(-radius, radius) + peakCenter)]
   result <- tryCatch( as.data.table(diffAnovaOnePeak(onePeak, ...), keep.rownames = TRUE),
                       error = function(cond){
