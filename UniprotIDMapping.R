@@ -379,6 +379,17 @@ uniprotInfoFromWeb <- function(uniprotIDs, chunkSize = 25){
   
 }
 
+swissProtFromGeneName <- function (symbols, taxon_id = 9606){
+ results <-  UniProt.ws::mapUniProt(from = "Gene_Name",
+                                    to = "UniProtKB-Swiss-Prot",
+                                    columns = c("accession", "id", "organism_id"),
+                                    query = list(ids = symbols ))
+ setDT(results)
+ results[Organism..ID. == taxon_id][symbols, Entry, on = "From"]
+}
+
+
+
 speciesFromUniprotID <- function (uniprotIDs, chunkSize = 25){
   #speciesMap <- UniProt.ws::queryUniProt(unique(uniprotIDs, fields = c("accession", "id", "organism_name", "organism_id")))
   #setDT[speciesMap]
@@ -506,9 +517,22 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 }
 
 
-translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE){
-  translateUniprot2Something(uniprots, something = "SYMBOL", 
+translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE, isoformAware = FALSE){
+  if (isoformAware == TRUE){
+    isoforms <- data.table(isoforms = uniprots)
+    isoforms[, uniprots := gsub ("-[0-9]+$", "", isoforms)]
+    isoforms[ uniprots != isoforms, isoformNumber := tstrsplit(isoforms, "-")[[2]]]
+    uniprots <- isoforms$uniprots
+  }
+  genes <- translateUniprot2Something(uniprots, something = "SYMBOL", 
                              species = species, useDatFile = useDatFile, fillMissing = fillMissing)
+  
+  if (isoformAware == TRUE){
+    isoforms[, genes := genes]
+    isoforms[!is.na(genes) & !is.na(isoformNumber), genes := paste0(genes, "-iso", isoformNumber)]
+    genes <- isoforms$genes
+  }
+  return (genes)
 }
 
 translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", fillMissing = FALSE, useDatFile = FALSE) {
@@ -638,10 +662,10 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
 
 
 
-multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE){
+multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE, isoformAware = FALSE){
   toGenes <- data.table(uniprots = as.character(unique(uniprots)))
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
-  toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile)]
+  toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile, isoformAware = isoformAware)]
   toGenes[is.na(singleGene), singleGene := singleUniprot]
   if (simplify == TRUE){
     simplify = function(x)unique(sort(x))

@@ -16,7 +16,7 @@
 
 fitPoly.MultiplePowers <- function(data,
                                    polyColumn = "rank.time", otherTerms = c("SUBJECT"), yColumn = "LogIntensities",
-                                   powerRange = 1:5, maxSelectedPower = 3, minSelectedPower = 1,
+                                   powerRange = 1:3, maxSelectedPower = 3, minSelectedPower = 3,  # this setup will take 3 if available, or 2 then 1 if unavailable
                                    pValueOverall = 0.01, pValueIncrement = 0.05,
                                    start.times = c(0), useAbsoluteLog2FC = TRUE){
   # for debugging...
@@ -290,7 +290,7 @@ nicePolyFits.fullTable <- function (protQuant, splitColumn = "Protein",
 #' ... arguments passed to fitPoly.MultiplePowers (via parLapply)
 detrendedPolyFits <- function(actual, predicted, columnInfo = NULL, ...){
   if (is.null(columnInfo)){
-    columnInfo <- data.table(column = colnames(actual))[!grepl(spatialReferencePattern, column)]
+    columnInfo <- data.table(column = colnames(actual))#[!grepl(spatialReferencePattern, column)]
     columnInfo[, c("receptor", "time", "rep") := tstrsplit (column, split = "[_.]", keep = c(1,2,3))]
     columnInfo[, SUBJECT := factor(sprintf("batch.%s", rep))]
     

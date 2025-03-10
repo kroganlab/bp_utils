@@ -38,7 +38,9 @@ enricherOnGroups <- function(groupTable, geneColumn = "gene", groupColumns = c("
                                                                                      ...)))
                                      },
                                      cl=numProcessors)
-  }else{ # allow for group specific univderse
+  }else{ # allow for group specific universe
+    if (numProcessors > 1)
+      message("Multi-processing not enabled for the multi-universe case.")
     universe = universe[names(subTables)] # enforce order
     stopifnot (all(names(universe) == names(subTables))) # should fail at line above, but just in case
     enrichList <-  pbapply::pbmapply(subTables, universe, 
@@ -169,6 +171,13 @@ simplifyEnrichBySimilarUniverseMembership.general <- function (enrichResultsTabl
 simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
                                                       cutHeight = 0.99, broadest=FALSE, max_pAdjust = 0.01,
                                                       hclustMethod = "complete"){
+  
+  requiredColumns <- c("ID", "p.adjust", groupColumn, "geneID")
+  missingColumns <- setdiff(requiredColumns, colnames(enrichResultsTable))
+  if (length(missingColumns) > 0){
+    stop("Missing the required columns ", paste0(missingColumns, collapse = ', '))
+  }
+  
   if (length(unique(enrichResultsTable$ID)) < 2){
     message ("Nothing to simplify")
     return (list (enrichResultsTable, data.frame()))
@@ -356,7 +365,10 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable = NULL, fullEnrichTa
                                       colorGray.padjust = NULL, # same as max_pAdjust when NULL
                                       annotatePossibleMatches = TRUE,  row_names_gp = gpar(fontsize = 10),
                                       upperThreshold  = NULL,
-                                      pvalColumn = "p.adjust", ...){
+                                      pvalColumn = "p.adjust",
+                                      rownamesFunction = identity,
+                                      column_split = NULL,
+                                      ...){
   if (!is.null(pipeLineList)){
     if(is.null(simplifiedEnrichTable)) simplifiedEnrichTable <- pipeLineList$simp[[1]]
     if(is.null(fullEnrichTable)) fullEnrichTable <- pipeLineList$simp[[2]]
@@ -443,10 +455,19 @@ enrichHeatmapBestPerGroup <- function(simplifiedEnrichTable = NULL, fullEnrichTa
     topBars <- NULL
   }
   
+  rownames(main.mat) <- rownamesFunction(rownames(main.mat))
+  
+  if ("function" %in% class(column_split)){
+    column_split = column_split(colnames(main.mat))
+  }
+  
+  
+  
   if (! is.null(colorGray.padjust))
     max_pAdjust <- colorGray.padjust
   hm <- heatmapNumbered (main.mat, counts.mat, negCols, title, max_pAdjust = max_pAdjust, bottom_annotation = topBars, row_names_gp = row_names_gp,
-                         upperThreshold = upperThreshold,...)
+                         upperThreshold = upperThreshold,
+                         column_split = column_split,...)
   
   invisible(list(geneTable = geneTable, main.mat = main.mat, counts.mat = counts.mat, hmList = hm))
 }
@@ -753,7 +774,7 @@ limitGMT2PantherGOslim <- function (gmt.dt, fileOrURL = "http://data.pantherdb.o
 #' Given a matrix and a column name perform fgsea on a single column
 #' @param sets a named list of genes/proteins vectors. Each vector is a single set. vector items must match rownames of mat
 #' @param scoreType usually "std" for positive and negative values together, or "pos" for positive only
-oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), fgseaFunction = fgsea::fgsea, ...){
+oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "neg"), fgseaFunction = fgsea::fgsea, removeZeros = FALSE,...){
   #print (columnName)
   log2FC <- mat[,columnName]
   
@@ -781,6 +802,11 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
   # fgsea fails with missing values
   log2FC <- log2FC[!is.na(log2FC)]
   
+  if (removeZeros){
+    message ("Removing values == 0.0")
+    log2FC <- log2FC[log2FC != 0.0]
+   print ( head (log2FC) )
+  }
 
   
   #nperm=1000, gseaWeightParam = 1, nproc=1

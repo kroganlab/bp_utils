@@ -321,4 +321,27 @@ col2hex <- function(cname)
 } # copied from gplots::col2hex
 
 
+#' @description
+#' make ggplot’s scale_color_gradientn work a lot like circlize::colorRamp2
+#' 
+#' 
+scale_color_gradient_colorRamp2 <- function (colors, breaks, ...){
+  if(length(colors) != length(breaks))
+    warning("length of colors and breaks differ...expect the unexpected\n")
+  scale_color_gradientn( colors = colors,
+                         values = c(scales::rescale(breaks)),
+                         limits = range(breaks),
+                         oob = scales::squish,
+                         ...)
+}
 
+
+scale_fill_gradient_colorRamp2 <- function (colors, breaks, ...){
+  if(length(colors) != length(breaks))
+    warning("length of colors and breaks differ...expect the unexpected\n")
+  scale_fill_gradientn( colors = colors,
+                         values = c(scales::rescale(breaks)),
+                         limits = range(breaks),
+                         oob = scales::squish,
+                         ...)
+}

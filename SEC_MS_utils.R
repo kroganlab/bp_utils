@@ -239,14 +239,17 @@ fitLocalCubics<- function (qcSummary,window =15,extend  = 3,
                            #choose one:
                            sampleTerm = c("additive",
                                           "interaction",
-                                          "interactionByTreatment")[1]){
+                                          "interactionByTreatment",
+                                          "singleSample")[1]){
   additiveModel <-  as.formula ("medPolishIntensity~poly(fraction,3) + sample")
   interactionModel <-     as.formula ("medPolishIntensity~poly(fraction,3) * sample")
   interactionByTreatmentModel <- as.formula ("medPolishIntensity~poly(fraction,3) + poly(fraction,3):treatment + sample")
+  singleSampleModel <- as.formula("medPolishIntensity~poly(fraction,3)")
   
   model <- c(interaction = interactionModel,
              additive =additiveModel,
-             interactionByTreatment = interactionByTreatmentModel)[[sampleTerm]]
+             interactionByTreatment = interactionByTreatmentModel,
+             singleSample = singleSampleModel)[[sampleTerm]]
   
   .doOneLocalCubic <- function( startRange, fullData, rangeWidth){
     
@@ -269,7 +272,7 @@ fitLocalCubics<- function (qcSummary,window =15,extend  = 3,
 #' @param threshold absolute fold change (in linear space) to define an outlier. A value with abs(median(residuals)) > log2(threshold) will be labeled an outlier 
 
 labelOutliers <- function(qcSummary, localCubicFits, threshold = 1.5){
-  qcSummary[allFits[, .(medianResidual = median(residual)), by = .(sample , fraction)],
+  qcSummary[localCubicFits[, .(medianResidual = median(residual)), by = .(sample , fraction)],
             medianResidual := i.medianResidual,
             on = c("sample",  "fraction")
   ]
@@ -312,8 +315,8 @@ UNnormalize <- function(secLong.dt){
 
 #' @description 
 #' A line and scatterplot showing per-fraciton values (by median polish), outliers labeled, and fitted curves
-plotNormAndOutlierFits <- function(qcSummary, allFits){
-  p <- ggplot (allFits, aes(x = fraction)) + 
+plotNormAndOutlierFits <- function(qcSummary, localCubicFits){
+  p <- ggplot (localCubicFits, aes(x = fraction)) + 
     geom_line(aes(y = fitted, group = fit), show.legend = FALSE, alpha = 0.2) + 
     geom_point(data = qcSummary, aes(y = medPolishIntensity, color = isOutlier), show.legend = FALSE) +
     theme_bw()
@@ -323,7 +326,7 @@ plotNormAndOutlierFits <- function(qcSummary, allFits){
   }
   
   
-  if (all(c("treatment", "replicate")  %in% colnames(allFits)) &
+  if (all(c("treatment", "replicate")  %in% colnames(localCubicFits)) &
       all(c("treatment", "replicate") %in% colnames(qcSummary))){
     p <- p +  facet_grid(treatment~replicate)
   }else{
@@ -498,7 +501,7 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat,
       stats.dt[, postProb := postOdds/(postOdds + 1) ]
       
     }else{
-      cor.dt <- cor.dt[pearsonR > 0.9 & protein1 != protein2] # limit to just the most promising
+      cor.dt <- cor.dt[pearsonR > thresholdR & protein1 != protein2] # limit to just the most promising
       stats.dt <- data.table()
     }
     
@@ -565,8 +568,8 @@ decoysFromString <- function (genes,
   # find distant genes in string
   rm.na <- function(x)x[!is.na(x)]
   dists <- igraph::distances(g, 
-                             rm.na (match( genes, names(V(g)))),
-                             rm.na (match( genes, names(V(g)))))
+                             rm.na (match( genes, names(igraph::V(g)))),
+                             rm.na (match( genes, names(igraph::V(g)))))
   distantGenes <- which(dists > stringDistThreshold, arr.ind = TRUE) |> as.data.table(keep.rownames = TRUE)
   # distantGenes is a data.table with columns rn, row, col. 
   # row and col are indeces to dimensions of dists matrix
@@ -646,7 +649,11 @@ goldStandardPairs <- function (genes,
   genes <- grep("^KRT", genes, invert = TRUE, value = TRUE)
   
   #corum
-  corumPairs <- unique(corumPairs(corum.path, geneAliasFunction)[, .(gene1, gene2)])
+  if (!is.null(corum.path)){
+    corumPairs <- unique(corumPairs(corum.path, geneAliasFunction)[, .(gene1, gene2)])
+  }else{
+    corumPairs <- data.table (gene1 = c(), gene2 = c())
+  }
 
   # string
   string <- fread (string.links.path)
@@ -689,6 +696,19 @@ corumPairs <- function(corum.path = "~/Downloads/corum_humanComplexes.txt",
   return(corumPairs)
 }
 
+
+#' returns complex id and name together with gene1, gene2
+corumPairs <- function(corum.path = "~/Downloads/corum_humanComplexes.txt"){
+  # corum
+  corum <- fread (corum.path)
+  .allByAll <- function(genes){
+    data.table(gene1 = genes)[, .(gene2 = genes), by = gene1][]
+  }
+  corumPairs <- corum[, .allByAll(unlist(strsplit(subunits_gene_name, ";"))), by = .(complex_id, complex_name)]
+  
+  corumPairs <- unique(corumPairs[gene1 < gene2, .(gene1, gene2, complex_id, complex_name)])
+  return(corumPairs)
+}
 
 
 
@@ -918,7 +938,10 @@ goodPeaksTableFromIntensityMatrix <- function (intMat, minPeakHeight = 0.01, cen
   #cv
   allPeaks[, cv := sqrt(var)/mean]
   
-  allPeaks[, goodPeak := (peakHeight > minPeakHeight & centerComplete & cv > minCV)]
+  allPeaks[, goodCV := cv > minCV ]
+  allPeaks[, goodHeight := peakHeight > minPeakHeight]
+  
+  allPeaks[, goodPeak := goodHeight & centerComplete & goodCV]
   return (allPeaks[])
 }
 
@@ -1112,9 +1135,12 @@ matchTwoPeakTables <- function (peaks.dt, i.peaks.dt, matchColumn  = "peakLocati
 #'                            Fractions with low counts of peaks may skew the alignment
 #' @param fitPortion Per fraction in otherPeaks, this is the portion of points (around the median) to include in loess fitting.
 #'                   The default, 0.75, means bottom 12.5% and  top 12.5% of values are ignored as they are likely full of outliers. 
-standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50, firstPeak = 1, lastPeak = 72, doPlots = TRUE, fitPortion = 0.75, startFitAtPeak = 15){
+standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50,
+                                               firstPeak = 1, lastPeak = 72,
+                                               doPlots = TRUE, fitPortion = 0.75, startFitAtPeak = 15){
   message ("Matching peaks between samples...")
-  matchedPeaks <- matchTwoPeakTables (otherPeaks, standardPeaks)
+  matchedPeaks <- matchTwoPeakTables (otherPeaks, i.peaks.dt = standardPeaks)
+  matchedPeaks <- matchedPeaks[cofmN >= startFitAtPeak & i.cofmN >= startFitAtPeak]
   
   # # barplots of matchedPeaks per fraction
   # if (doPlots){
@@ -1123,7 +1149,7 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
   # }
   
   goodFractions <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE, .N, by = peakLocation][N > minPeaksPerFraction, peakLocation]
-  goodFractions <- goodFractions[goodFractions > startFitAtPeak]
+  #goodFractions <- goodFractions[goodFractions > startFitAtPeak]
   
   subData <- matchedPeaks[goodPeak == TRUE & i.goodPeak == TRUE][
     peakLocation %in% goodFractions][
@@ -1133,7 +1159,9 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
   
   if(doPlots){
     p <- ggplot (subData, 
-                 aes(x = cofmN, y = i.cofmN)) + 
+                 aes(x = i.cofmN, y = cofmN)) +
+      scale_x_continuous(name = "Peak location in standard (cofmN)") + 
+      scale_y_continuous(name = sprintf("Peak location in %s (cofmN)", sampleName)) + 
       geom_point(alpha = 0.2, shape = ".") + 
       coord_fixed() + 
       geom_abline(slope = 1) +
@@ -1187,7 +1215,11 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
 #'  sec.dt will be updated with a `standardFraction` column
 #' @param standardIdx Either an integer or character name identifying which table of allPeakTables to use
 #'                    as the standard that all other tables will be adjusted to.
-#' @param ... arguments passed to `standardizeOnePeakTableToStandard` that does the pairwise adjusting
+#' @param ... arguments passed to `standardizeOnePeakTableToStandard` that does the pairwise adjusting,
+#'            relevant arguments include
+#'    * `startFitAtPeak` the integer value at which to start fits. Useful when initial peaks are difficult to align
+#' 
+#' 
 #' 
 standardizeAllPeakTablesToStandard <- function (allPeakTables, sec.dt,  standardIdx = 1, ...){
   if("character" %in% class(standardIdx)){
@@ -1282,8 +1314,12 @@ clusterPeaks <- function(peakCenters, maxDistance = 2){
 
 
 diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
-  lmout <- lm( log2(intensity_totalScaled)~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
-  lmout.noInteraction <- lm( log2(intensity_totalScaled)~ poly(standardFraction, 4)+treatment, onePeakSec.dt)
+  # we work in log space, so zeros need to get replaced with NA
+
+  onePeakSec.dt[intensity_totalScaled > 0, log2_intensity_totalScaled := log2(intensity_totalScaled)]
+  
+  lmout <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
+  lmout.noInteraction <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)+treatment, onePeakSec.dt)
   
   #onePeakSec.dt[, fitted := 2^predict(lmout)]
   

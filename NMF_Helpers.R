@@ -179,7 +179,7 @@ PlotNMFHeatmap <- function (nmf.out,
                             name = "linearScale",
                             mainColors = c("white", "firebrick"),
                             basisColors = RColorBrewer::brewer.pal(8, "Dark2"),
-                            topAnno = c("lines", "bars", "heatmap"),
+                            topAnno = c( "bars","lines", "heatmap"),
                             ...){
   coef.mat <- t(NMF::coef(nmf.out))
   rank <- ncol(coef.mat)
