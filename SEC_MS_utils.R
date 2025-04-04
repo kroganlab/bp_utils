@@ -100,6 +100,8 @@ qcPlotsSecMS <- function(secLong.dt){
 # scaling ----
 
 
+
+
 scaleByTotalIntensity <- function(secLong.dt){
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
 }
@@ -108,6 +110,10 @@ scaleByTotalIntensity <- function(secLong.dt){
 scaleByMaxIntensity <- function(secLong.dt){
   secLong.dt[, intensity_maxScaled := intensity/(max(intensity, na.rm = TRUE)), by= .(sample, protein)]
 }
+scaleByMaxIntensity_global <- function(secLong.dt){
+  secLong.dt[, intensity_maxScaled := intensity/(max(intensity, na.rm = TRUE)), by= .( protein)]
+}
+
 
 
 # matrices ----
@@ -184,8 +190,9 @@ reorderMatricesByMaxFraction <- function(mats){
 }
 # Heatmaps ----
 
-intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
-  colorFun <- circlize::colorRamp2(breaks = (0:50)/200, colors = viridis::magma(51,direction = -1))
+intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3,...){
+  denom = 50 / topOfColorRange
+  colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis::magma(51,direction = -1))
   samples <- names(intMats)
   
   sample <- samples[1]
@@ -203,7 +210,8 @@ intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
                   
                   #first only:
                   show_heatmap_legend = TRUE, 
-                  row_title = sprintf ("%d Proteins", nrow(intMats[[sample]]))
+                  row_title = sprintf ("%d Proteins", nrow(intMats[[sample]])),
+                  ...
   )
   
   # first one gets row title, also gets a legend
@@ -221,7 +229,8 @@ intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity"){
                             column_labels = ifelse(as.integer(colnames(intMats[[sample]])) %% 5 == 0, colnames(intMats[[sample]]), ""),
                             column_title = sample,
                             # 
-                            show_heatmap_legend = FALSE)      
+                            show_heatmap_legend = FALSE,
+                            ...)      
     }
     
   }
@@ -537,6 +546,7 @@ windowedCorrelation <- function (intensity.mat, goodPeaks.mat,
 #'                   example https://stringdb-downloads.org/download/protein.physical.links.detailed.v12.0/9606.protein.physical.links.detailed.v12.0.txt.gz
 #' @param info.path path to string file with gene name etc info
 #'                  example https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz
+#'                  or a data.table with columns `#string_protein_id` and `preferred_name`                  
 #' @param combinedScoreThreshold only edges with combined score above this will be considered
 #' @param stringDistThreshold protein pairs greater distance than this will be called a decoy
 #' @param geneAliasFunction a function that will convert a list of genes to the canonical alias
@@ -557,8 +567,13 @@ decoysFromString <- function (genes,
   string <- fread (links.path)
   string <- string[combined_score > combinedScoreThreshold  ]
   
-  
-  proteinNames <- fread (info.path)
+  if ("data.table" %in% class(info.path)){
+    proteinNames <- info.path
+  }else if (is.null(info.path)){
+    proteinNames <- data.table (`#string_protein_id` = genes, preferred_name = genes)
+  }else{
+    proteinNames <- fread (info.path)
+  }
   string[proteinNames, gene1 := i.preferred_name , on = c(protein1 = "#string_protein_id")]
   string[proteinNames, gene2 := i.preferred_name , on = c(protein2 = "#string_protein_id")]
   
@@ -631,6 +646,7 @@ scoreByGS <- function (sub.dt, denomDecoy, denomInteractor, column = "meanLL", g
 #'                   example https://stringdb-downloads.org/download/protein.physical.links.detailed.v12.0/9606.protein.physical.links.detailed.v12.0.txt.gz
 #' @param string.info.path path to string file with gene name etc info
 #'                  example https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz
+#'                  or a data.table with columns `#string_protein_id` and `preferred_name`
 #' @param combinedScoreThreshold only edges with combined score above this will be considered
 #' @param geneAliasFunction a function that will convert a list of genes to the canonical alias
 #'                          `function(charGeneVector){... return(charGeneAliasVector)}`
@@ -660,7 +676,13 @@ goldStandardPairs <- function (genes,
   string <- string[combined_score > stringCombinedScoreThreshold  ]
   
   
-  proteinNames <- fread (string.info.path)
+  if ("data.table" %in% class(string.info.path)){
+    proteinNames <- string.info.path
+  }else if (is.null(string.info.path)){
+    proteinNames <- data.table (`#string_protein_id` = genes, preferred_name = genes)
+  }else{
+    proteinNames <- fread (string.info.path)
+  }
   string[proteinNames, gene1 := i.preferred_name , on = c(protein1 = "#string_protein_id")]
   string[proteinNames, gene2 := i.preferred_name , on = c(protein2 = "#string_protein_id")]
   

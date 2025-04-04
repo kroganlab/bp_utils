@@ -359,7 +359,11 @@ uniprotSequencesFromWeb <- function (uniprotIDs, chunkSize = 25, fields = c("acc
   queries <- paste0("accession:", uniprots)
   res <- setDT(UniProt.ws::queryUniProt(queries, fields = c("accession", "id", "organism_name", "organism_id", "gene_primary", "gene_names", "protein_name", "length")))
   #print (res)
-  res[uniprots,query := Entry , on = "Entry"]
+  if(nrow(res) > 0 & "Entry" %in% colnames(res)){
+    res[uniprots,query := Entry , on = "Entry"]
+  }else{
+    warning ("No results for", head (uniprots), "...")
+  }
   res[]
 }
 
@@ -374,7 +378,7 @@ uniprotInfoFromWeb <- function(uniprotIDs, chunkSize = 25){
   # function(uniprotIDs)
   #   UniProt.ws::queryUniProt(uniprotIDs, fields = c("accession", "id", "organism_name", "organism_id")))
   
-  speciesMap <- rbindlist(speciesMapList)
+  speciesMap <- rbindlist(speciesMapList, use.names = TRUE, fill = TRUE)
   return (speciesMap)
   
 }
