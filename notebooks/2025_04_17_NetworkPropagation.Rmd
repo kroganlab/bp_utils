@@ -7,11 +7,12 @@ output: html_notebook
 ```{r}
 library (data.table)
 library (ggplot2)
+# sourced files below will require other packages
 ```
 
 
 # Build S matrices
-The S matrix stores the full all-by-all "connectivity" of a network, either by random-walk or diffusion. Creating an S matrix is computationally expensive, but they only have be calculated once per diffusion/walk-length parameter and network. They are network-dependent, not data-dependent.  These calculations in single-threaded base R can be very slow, so I use python here to calculate them, where it should only take a few minutes on a multi-core machine.  See scripts:
+The S matrix stores the full all-by-all "connectivity" of a network, either by random-walk or diffusion. Creating an S matrix is computationally expensive, but they only have to be calculated once per diffusion/walk-length parameter and network. They are network-dependent, not data-dependent.  These calculations in single-threaded base R can be very slow, so I use python here to calculate them, where it should only take a few minutes on a multi-core machine.  See scripts:
 
 `../NetworkPropagation_Build_S_matrix.py`
 `../NetworkPropagation_Build_S_matrix.diffusion.py`
