@@ -1,0 +1,106 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library (data.table)
+library (ggplot2)
+```
+
+
+# Build S matrices
+The S matrix stores the full all-by-all "connectivity" of a network, either by random-walk or diffusion. Creating an S matrix is computationally expensive, but they only have be calculated once per diffusion/walk-length parameter and network. They are network-dependent, not data-dependent.  These calculations in single-threaded base R can be very slow, so I use python here to calculate them, where it should only take a few minutes on a multi-core machine.  See scripts:
+
+`../NetworkPropagation_Build_S_matrix.py`
+`../NetworkPropagation_Build_S_matrix.diffusion.py`
+
+These files have paths and parameters hard-coded within them. Edit the files as needed then run one or the other (or both): 
+
+```{bash, eval = FALSE}
+python ../NetworkPropagation_Build_S_matrix.py
+```
+
+Once you have the S matrices saved, you can simply load the one you want using the code below:
+
+# Load precomputed S matrix
+
+```{r}
+source ("../bp_utils/NetworkPropagation.R")
+# update paths to match location of your S-matrix files
+Smatrix <- LoadNumPyS_matrix(matrixPath = "../S_matrix.string11.5.gt900.time0.30.npy",
+                  nodesTablePath = "../S_matrix.string11.5.gt900.time0.30.nodeNames.csv")
+```
+
+
+# Load starting heat
+Requirements are a table with `gene` and `heat` columns. 
+
+The `heat` can be something like magnitude of effect, for example `abs(log2FC)`, or significance level, for example `-log10(Pvalue)`. Greater heat implies greater biological relevance.
+
+The `gene` column must match the gene labels in the network. For string, they are formatted like: `9606.ENSP00000383611`, which isn't particularly helpful, but can be translated to gene symbols.  (Alternatively, you could start with a network that uses gene symbols, you can skip the gene name translation steps.)
+
+
+```{r}
+inputHeats.dt <- fread ("../../bp_utils/data/example_heatForNetworkPropagation.csv")
+```
+
+## example code for getting STRING-like identifiers
+The above `inputHeats.dt` table already has STRING-like gene names. But on your own data, you can use this code to get STRING-like names. This works for gene symbols, or most any kind of identifier. It makes use of the protein aliases file you can download from STRING.
+
+```{r, eval = FALSE}
+source ("../../bp_utils/STRING_db_utils.R")
+inputHeats.dt[, gene := GetStringIDMapping.inOrder(ids = symbol,
+                                                   # https://string-db.org/cgi/download
+                                                   # update path to where you downloaded this file:
+                                                   stringAliasFile = "~/Downloads/9606.protein.aliases.v11.5.txt.gz")]
+```
+
+# Propagate
+
+This can be sped up significantly with an optimized BLAS (linear algebra) library.  If you're going to do a lot of network propagation, you probably want to look into this.
+See, for example, https://github.com/goepp/r-blas
+
+```{r}
+netProp.dt <- NetworkPropagateS_matrix(
+  Smatrix, inputHeats.dt,
+  numPermutations = 20000,  # reduce this to test your setup in less runtime. Otherwise leave at 20000
+  permuteOnlyInObserved = TRUE, # Recommended TRUE. 
+                                # Input sparse data sets are biased to certain pathways.
+                                # This controls for that bias.
+  networkHeatOnly = TRUE  # When set to TRUE, a gene is scored for heat it gets from other genes on the network
+                          # When set to FALSE, a gene gets heat from itself and from others.
+                          # Recommendation: it depends,
+                          # TRUE lets you see "farther" on the netowrk.
+                          # FALSE makes it more likely for all input sig. genes to survive propagation, but 
+                          # at the expense of less "guilt by association" genes
+)
+```
+# example translate string IDs to gene symbols
+
+```{r}
+# https://string-db.org/cgi/download
+stringInfo <- fread ("~/Downloads/9606.protein.info.v12.0.txt.gz")
+
+netProp.dt[stringInfo, symbol := i.preferred_name, on = c(gene = "#string_protein_id")]
+```
+
+
+# example view of data
+```{r}
+ggplot (netProp.dt, aes(x= z, y= -log10(adj.pvalue))) +
+  geom_point(shape = ".") + 
+  ggrepel::geom_text_repel(aes(label = symbol),
+                           # select a random sample of 20 significant genes to label
+                           data = netProp.dt[adj.pvalue < 0.01][sample.int(.N, 20)],
+                           size = 2, color ="red")
+```
+
+# write data out
+
+```{r}
+fwrite (netProp.dt, "NetworkPropagationResults.csv")
+```
+
+
