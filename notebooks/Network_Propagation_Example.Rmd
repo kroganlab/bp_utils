@@ -7,6 +7,11 @@ library (data.table)
 library (ggplot2)
 ```
 
+# This has been replaced by 2025_04_17_NetworkPropagation.Rmd
+
+```{r}
+stop( "This has been replaced by file 2025_04_17_NetworkPropagation.Rmd. Proceed at your own risk (as always)")
+```
 
 
 # Load data from MSstats
