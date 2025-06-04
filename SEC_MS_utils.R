@@ -97,6 +97,600 @@ qcPlotsSecMS <- function(secLong.dt){
 }
 
 
+qcFractionRunsPerProtein <- function(matrices= NULL, sec.dt = NULL){
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+
+  .oneRow <- function(intensity){
+    r <- rle(intensity>0)
+    if (!any(r$values == TRUE))
+      return(0)
+    max(r$lengths[r$values == TRUE])
+  }  
+  .oneMatrix <- function(mat){
+    apply(mat, 1, .oneRow)
+  }
+  
+  runs <- lapply(matrices, .oneMatrix)
+  # runs is a list of protein-named runs
+  
+  do.call(cbind, runs) |> 
+    as.data.table(keep.rownames = TRUE) |>
+    setnames(old = "rn", new = "protein") |>
+    melt(id.vars = "protein", value.name = "longestRun", variable.name = "sample")
+}
+
+qcFractionsPerProtein <- function(matrices = NULL, sec.dt = NULL){
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+  
+  .oneRow <- function(x)sum(x>0, na.rm = TRUE)
+  .oneMatrix <- function(mat){
+    apply(mat, 1, .oneRow)
+  }
+  fractionCounts <- lapply(matrices, .oneMatrix)
+  do.call(cbind, fractionCounts) |> 
+    as.data.table(keep.rownames = TRUE) |>
+    setnames(old = "rn", new = "protein") |>
+    melt(id.vars = "protein", value.name = "countFractions", variable.name = "sample")
+}
+
+
+
+## correlations/overlaps ----
+
+
+#' simplest correlation, sample by sample
+#' concatenates all fraction vectors for a sample into a nFraction X nProtein length vector
+#' correlates these full sample vectors
+
+qcFullSampleCorrelation <- function(sec.dt){
+  long.sample.mat <- dcast(sec.dt, sprintf ("%02d.%s", fraction, protein)~sample, value.var = "intensity_totalScaled") |> 
+    as.matrix(rownames = 1)
+  
+  long.sample.mat[is.na(long.sample.mat)] <- 0.0
+  sample.cor <- cor(long.sample.mat)
+  return (sample.cor)
+}
+
+
+#' similar to `qcFullSampleCorrelation`, but builds offset matrices for each matrix
+#' Each offset matrix is padded with zero-columns at left and right, up to radius, and leftpad + rightpad = 10
+#' @param startFraction limits the fractions used to a middle-subset of all fractions
+#' @param endFraction limits the fractions used to a middle-subset of all fractions
+#' @returns A data.table with correlation values in long format
+crossCorrelationFullSample <- function(sec.dt, startFraction = 15, endFraction = 60, radius = 5){
+  # Helper functions to build zero-padded matrices
+  ..padOneMat <- function(mat, pre, post, fill = 0.0){
+    prePad = NULL
+    postPad = NULL
+    if(pre > 0)
+      prePad <- matrix(rep(fill, pre * nrow(mat)), nrow = nrow(mat), dimnames = list(rownames(mat), -(pre-1):0))
+    if (post > 0)
+      postPad <- matrix(rep(fill, post * nrow(mat)), nrow = nrow(mat), dimnames = list(rownames(mat), (ncol(mat)+1):(ncol(mat)+post)))
+    paddedMat <- cbind(prePad, mat, postPad)
+  }
+  .padListMatrices <- function (matList, offset, radius){
+    stopifnot(abs(offset) <= radius)
+    pre = radius - offset
+    post = radius + offset
+    paddedMats <- lapply (matList, ..padOneMat, pre = pre, post = post)
+    names(paddedMats) <- sprintf("%s_offset%d", names(matList), offset)
+    return (paddedMats)
+  }
+  # /Helper functions
+  
+  all.mats <- scaledIntensityMatrices(sec.dt[fraction %inrange% c(startFraction, endFraction)])
+
+  paddedMats <- lapply (-radius:radius, function(x).padListMatrices(all.mats, offset = x, radius = radius))
+  # a list of lists, but all should be named....
+  paddedVecs <- lapply( unlist(paddedMats, recursive =FALSE), as.vector)
+  matOfOffsetMats <- do.call(cbind, paddedVecs)
+  
+  
+  matOfOffsetMats[is.na(matOfOffsetMats)] <- 0.0
+  allCor <- cor(matOfOffsetMats)
+  
+  cor.long <- melt(as.data.table(allCor,keep.rownames = TRUE),id.vars = "rn", variable.name = "cn", value.name = "pearsonR")
+  cor.long <- cor.long[grepl("offset0", rn)]
+  cor.long[, refSample := gsub ("_offset0", "", rn)]
+  cor.long[, c("otherSample", "offset") := tstrsplit(cn, "_offset")]
+  cor.long[, offset := as.integer(offset)]
+  
+  offset.mat <- dcast(cor.long[, .SD[which.max(pearsonR)], by= .(refSample, otherSample)],
+                      refSample~otherSample, value.var = "offset") |> as.matrix(rownames = 1) 
+  
+  offset.hc.order <- hclust(dist(offset.mat))$order
+  cor.long[, refSample := factor(refSample, levels = rownames(offset.mat)[offset.hc.order])]
+  cor.long[, otherSample := factor(otherSample, levels = rownames(offset.mat)[offset.hc.order])]
+  
+  
+}
+
+
+#' correlation of all fractions to all fractions
+#' @param returnDataTable returns data.table if TRUE, or correlation matrix if FALSE
+qcFractionByFractionCorrelation <- function(sec.dt = NULL, matrices = NULL, returnDataTable = TRUE, method = "pearson"){
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+
+  # rename columns to include sample name
+  res <- purrr::map2(names(matrices), matrices, function(name, mat){colnames(mat) <- sprintf("%s.fraction%02d", name, as.integer(colnames(mat))); mat})
+  fullMat <- do.call(cbind, res)
+  fullMat[is.na(fullMat)] <- 0.0
+  suppressWarnings(fullCor <- cor(fullMat, use = "everything", method = method))
+  
+  
+  if (returnDataTable){
+    fullCor.long <- melt(as.data.table(fullCor, keep.rownames = TRUE), id.vars = "rn", value.name = method, variable.name = "cn")
+    fullCor.long[, c("ref.sample", "ref.fraction") := tstrsplit(rn, "\\.")]
+    fullCor.long[, c("other.sample", "other.fraction") := tstrsplit(cn, "\\.")]
+    fullCor.long[, ref.fraction := as.integer(gsub("fraction", "", ref.fraction))]
+    fullCor.long[, other.fraction := as.integer(gsub("fraction", "", other.fraction))]
+    fullCor.long[, ref.treatment := tstrsplit(ref.sample, "_")[[1]]]
+    fullCor.long[, other.treatment := tstrsplit(other.sample, "_")[[1]]]
+    fullCor.long[, ref.replicate := tstrsplit(ref.sample, "_")[[2]]]
+    fullCor.long[, other.replicate := tstrsplit(other.sample, "_")[[2]]]    
+    
+    return (fullCor.long)
+  }
+  return (fullCor) # matrix
+
+}
+
+
+#' @param fullCor.long output of qcFractionByFractionCorrelation(..., returnDataTable = TRUE)
+#' @param allowFractionOffsets 
+#' @param splitByReplicate
+#' @param colorFacetStrips boolean indicating if an attempt should be made to color the facet headers to match
+#'                         the treatment colors. This is hack-ish, may break, and requires that you use
+#'                         grid.draw to draw the output.
+
+qcFractionCorrelationLinePlot <- function(fullCor.long,
+                                          colorFacetStrips = TRUE,
+                                          allowFractionOffsets = FALSE,
+                                          splitByReplicate = FALSE,
+                                          facetTextColor = "white", # to look good on below colors
+                                          treatmentColors = c("#E41A1C", "#377EB8", "#4DAF4A", 
+                                                              "#984EA3", "#FF7F00", # "#FFFFFF",
+                                                              "#A65628", "#F781BF", "#999999")){
+  
+  
+  if (allowFractionOffsets){
+    fullCor.long.fractionMatch <- fullCor.long[!is.na(pearson), .SD[which.max(pearson)], by = .(ref.sample, ref.fraction, other.sample)]
+  }else{
+    fullCor.long.fractionMatch <- fullCor.long[ref.fraction == other.fraction]
+  }
+
+  p <- ggplot(fullCor.long.fractionMatch[ref.sample!= other.sample], aes(x = ref.fraction, y = pearson, color = other.treatment)) + 
+    geom_line( aes(lty = other.treatment != ref.treatment,  alpha = other.treatment != ref.treatment, group = interaction(ref.sample, other.sample)))  +
+    theme_bw() +
+    scale_linetype(name = 'contrast', label = c("within treatment", "between treatments")) +
+    scale_color_manual(values = treatmentColors) +
+    scale_alpha_manual(values = c(`TRUE` = 0.5, `FALSE` = 1.0)) +
+    guides(alpha = "none") +
+    theme(strip.text = element_text(color = facetTextColor))
+  
+  if (splitByReplicate){
+    p <- p + facet_grid(ref.treatment~ref.replicate)
+  }  else{
+    p <- p + facet_grid(ref.treatment~.)
+  }
+  
+  if (colorFacetStrips){
+    # see https://github.com/tidyverse/ggplot2/issues/2096#issuecomment-389825118
+    g <- ggplot_gtable(ggplot_build(p))
+    strip_r <- which(grepl('strip-r', g$layout$name))
+    fills <- treatmentColors
+    k <- 1
+    for (i in strip_r) {
+      j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+      g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[k]
+      k <- k+1
+    }
+    message ("Returning a grid graphical object, g. Print using grid.draw(g). Or BackupAsPDF(function()grid.draw(g))")
+    return(g)
+    #grid.draw(g)
+  }
+  return (p)
+}
+
+
+qcProteinOverlapByFraction <- function (sec.dt = NULL, matrices= NULL, returnTable = TRUE){
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+  
+  # rename columns to include sample name
+  res <- purrr::map2(names(matrices), matrices, function(name, mat){colnames(mat) <- sprintf("%s.fraction%02d", name, as.integer(colnames(mat))); mat})
+  fullMat <- do.call(cbind, res)
+  fullMat[is.na(fullMat)] <- 0.0
+  
+  # we use dist, method = binary, which does 1-jaccard between rows of a matrix
+  # ceiling converts numeric to smallest integer >= x, so 0 when 0, and 1 when >1
+  allDist <- dist(t(ceiling(fullMat)), method = "binary")
+  allJaccard <- 1- as.matrix(allDist)
+  if (!returnTable) return (allJaccard)
+  
+  allJaccard <- melt(as.data.table(allJaccard, keep.rownames = TRUE), id.vars = "rn", value.name = 'jaccard', variable.name = "cn")
+  allJaccard[, c("ref.sample", "ref.fraction") := tstrsplit(rn, "\\.")]
+  allJaccard[, c("other.sample", "other.fraction") := tstrsplit(cn, "\\.")]
+  allJaccard[, ref.fraction := as.integer(gsub("fraction", "", ref.fraction))]
+  allJaccard[, other.fraction := as.integer(gsub("fraction", "", other.fraction))]
+  allJaccard[, ref.treatment := tstrsplit(ref.sample, "_")[[1]]]
+  allJaccard[, other.treatment := tstrsplit(other.sample, "_")[[1]]]
+  allJaccard[, ref.replicate := tstrsplit(ref.sample, "_")[[2]]]
+  allJaccard[, other.replicate := tstrsplit(other.sample, "_")[[2]]]    
+  
+  return (allJaccard)
+}
+
+qcProteinOverlapByFractionPlot <- function (overlap.dt,
+                                            colorFacetStrips = TRUE,
+                                            facetTextColor = "white", # to look good on below colors
+                                            treatmentColors = c("#E41A1C", "#377EB8", "#4DAF4A", 
+                                                                "#984EA3", "#FF7F00", # "#FFFFFF",
+                                                                "#A65628", "#F781BF", "#999999")){
+  p <- ggplot(proteinOverlap[ref.sample != other.sample & ref.fraction == other.fraction],
+              aes(x = ref.fraction, y = jaccard, color = other.treatment)) +
+    geom_line( aes(lty = other.treatment != ref.treatment,  alpha = other.treatment != ref.treatment, group = interaction(ref.sample, other.sample)))  +
+    theme_bw() +
+    scale_linetype(name = 'contrast', label = c("within treatment", "between treatments")) +
+    scale_color_manual(values = treatmentColors) +
+    scale_alpha_manual(values = c(`TRUE` = 0.5, `FALSE` = 1.0)) +
+    guides(alpha = "none") +
+    theme(strip.text = element_text(color = facetTextColor)) +
+    facet_grid(ref.treatment~.)
+  
+  if (colorFacetStrips){
+    # see https://github.com/tidyverse/ggplot2/issues/2096#issuecomment-389825118
+    g <- ggplot_gtable(ggplot_build(p))
+    strip_r <- which(grepl('strip-r', g$layout$name))
+    fills <- treatmentColors
+    k <- 1
+    for (i in strip_r) {
+      j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+      g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[k]
+      k <- k+1
+    }
+    message ("Returning a grid graphical object, g. Print using grid.draw(g). Or BackupAsPDF(function()grid.draw(g))")
+    return(g)
+    #grid.draw(g)
+  }
+  return (p)
+}
+
+
+
+qcProteinCorrelationBetweenSamples <- function(sec.dt = NULL, matrices = NULL){
+  message ("not advised; little reason to do all-by-all protein correlation as QC.")
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+  
+  # rename rows to include sample name
+  res <- purrr::map2(names(matrices), matrices, function(name, mat){rownames(mat) <- sprintf("%s.protein.%s", name, rownames(mat)); mat})
+  fullMat <- do.call(rbind, res)
+  fullMat[is.na(fullMat)] <- 0.0
+  
+  fullCor <- cor(t(fullMat), use = "pairwise")
+  return (fullCor)
+}
+
+
+qcSameProteinCorrelationBetweenSamples <- function(sec.dt = NULL, matrices = NULL){
+  if (is.null(matrices))
+    matrices <- scaledIntensityMatrices(sec.dt)
+  
+  
+  pairSamples <- data.table(ref.sample = names(matrices))[
+    , .(other.sample = names(matrices)), by = ref.sample][
+      other.sample!= ref.sample]
+  
+  pairSamples[, pair := paste0(ref.sample, "_", other.sample)]
+  
+  # take the transpose to correlate by protein (proteins in columns)
+  tmatrices <- lapply(matrices, t)
+  # convert to data.table or data.frame, so mapply can walk across either. 
+  tmatrices <- lapply(tmatrices, as.data.table)
+  
+  .onePair <- function(ref, other)suppressWarnings( mapply(cor, tmatrices[[ref]], tmatrices[[other]]))
+  
+  
+  allCors <- purrr::map2(pairSamples$ref.sample, pairSamples$other.sample, .onePair, .progress = "Protein auto-correlation between samples...")
+  names(allCors) <- pairSamples$pair
+  
+  cor.dt <- do.call(cbind, allCors) |>
+    as.data.table(keep.rownames = TRUE) |>
+    melt(id.vars = "rn", value.name = "pearsonR", variable.name = "pair")
+  
+  cor.dt[pairSamples, c("ref.sample", "other.sample") := .(i.ref.sample, i.other.sample), on = "pair"]
+  cor.dt[, other.treatment := tstrsplit(other.sample, "_")[[1]]]
+  cor.dt[, ref.treatment := tstrsplit(ref.sample, "_")[[1]]]
+  cor.dt[, other.replicate := tstrsplit(other.sample, "_")[[2]]]
+  cor.dt[, ref.replicate := tstrsplit(ref.sample, "_")[[2]]]
+  
+  return (cor.dt[])
+}
+
+
+
+qcSameProteinCorrelationBetweenSamplesPlot <- function (cor.dt,
+                                                        colorFacetStrips = TRUE,
+                                                        facetTextColor = "white", # to look good on below colors
+                                                        treatmentColors = c("#E41A1C", "#377EB8", "#4DAF4A", 
+                                                                            "#984EA3", "#FF7F00", # "#FFFFFF",
+                                                                            "#A65628", "#F781BF", "#999999")){
+  
+  
+  p <- ggplot (cor.dt, aes(x = other.sample, y = pearsonR, fill = other.treatment)) +
+    geom_hline(yintercept = 0.0, lty = 'dashed', color = "grey") + 
+    geom_violin(aes(lty = other.treatment != ref.treatment) ) + 
+    facet_grid(ref.treatment~ref.replicate) +
+    theme_bw() +
+    rotate.x.axis.text +
+    scale_linetype(name = 'contrast', label = c("within treatment", "between treatments")) +
+    scale_fill_manual(values = treatmentColors)
+  
+  
+  if (colorFacetStrips){
+    # see https://github.com/tidyverse/ggplot2/issues/2096#issuecomment-389825118
+    g <- ggplot_gtable(ggplot_build(p))
+    strip_r <- which(grepl('strip-r', g$layout$name))
+    fills <- treatmentColors
+    k <- 1
+    for (i in strip_r) {
+      j <- which(grepl('rect', g$grobs[[i]]$grobs[[1]]$childrenOrder))
+      g$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[k]
+      k <- k+1
+    }
+    message ("Returning a grid graphical object, g. Print using grid.draw(g). Or BackupAsPDF(function()grid.draw(g))")
+    return(g)
+    #grid.draw(g)
+  }
+  return (p)
+}
+
+
+
+crossCorrelateRatioOneVector <- function(x, maxShift = 5, numerator = 1, denominator = 3:5){
+  if (all(x == 0)){
+    return(NA)
+  }
+  offsetMatrix <- sapply(1:(maxShift + 1), function(start)x[start:(length(x) -1 - maxShift + start)])
+  cor.mat <- cor(offsetMatrix[,1], offsetMatrix[, 2:maxShift])
+  mean(cor.mat[numerator])/mean(cor.mat[denominator])
+  
+}
+
+
+## cluster and GO enrich heatmap views ----
+
+clusterOneMat <- function(mat, corThreshold = 0.9, minClusterSize = 5){
+  mat[is.na(mat)] <- 0.0
+  emptyProteins <- names(which(rowSums(mat) == 0))
+  # before correlation, add consistent noise per fraction so completely-empty proteins have perfect correlation and cluster together.
+  mat <- sweep(mat, 2, STATS = runif(ncol(mat))/1000, FUN = "+")
+  
+  clustering <- cutree(hclust(as.dist(1-cor(t(mat))), method = "complete"),  h = 1-corThreshold)
+  clust.dt <- data.table(protein = names(clustering), cluster = sprintf("cluster.%04d", clustering))
+  clust.dt[, size := .N,by = cluster]
+  clust.dt[size < minClusterSize, cluster := 'cluster.0000']
+  clust.dt[size < minClusterSize, size := .N,by = cluster]
+  
+  if (length(emptyProteins) > 0){
+    # with the most missingProteins, proportionately
+    missingCluster <- clust.dt[protein %in% emptyProteins, .N/size, by= cluster][order(-V1)]$cluster[1]
+    clust.dt[cluster == missingCluster, cluster := "cluster.xxxx"]
+    
+  }
+  
+  computeClusterCenters(clust.dt, mat)
+  computeClusterMaxes(clust.dt, mat)
+  computeClusterSimilarityOrder (clust.dt, mat)
+  
+  return (clust.dt) 
+}
+
+#  source ("../../bp_utils/enrichmentTestFunctions.R")
+enrichClusterTable <- function(cluster.dt, gmt, numProcessors = 8,...){
+  enrich.dt <- enricherOnGroups(cluster.dt, geneColumn = "protein",
+                                groupColumns = "cluster", term2gene.gmt = gmt,
+                                universe = unique(cluster.dt$protein),
+                                minGSSize = 4, maxGSSize = 2000,
+                                numProcessors = numProcessors, ...)
+  return (enrich.dt)
+}
+
+fastEnrichClusterTable <- function (cluster.dt, gmt, minMatchSize = 3){
+  mutualProteins <- intersect(cluster.dt$protein, unique(gmt$gene))
+  
+  # size of gene sets
+  bgCount <- gmt[gene %in% mutualProteins, .(setSize = .N), by = ont]
+  
+  # gene set overlap with group
+  inGroupCount <- cluster.dt[gmt, , on = c(protein = "gene")][!is.na(cluster)][, .(groupANDsetSize = .N, proteins = paste0(protein, collapse = "/")), by = .(cluster, ont)]
+  
+  # group size
+  groupDenom <- cluster.dt[protein %in% mutualProteins, .(groupSize = .N), by= cluster]
+  
+  contingencyStats <- inGroupCount[groupDenom, , on = "cluster"][bgCount, , on = "ont"]
+  contingencyStats[, universeSize := length(mutualProteins)]
+  
+  # black and white balls in urn language. 
+  contingencyStats[, whiteBallsDrawn := groupANDsetSize]
+  contingencyStats[, totalWhiteInUrn := setSize]
+  contingencyStats[, totalBlackInUrn := universeSize - setSize]
+  contingencyStats[, totalBallsDrawn := groupSize]
+  
+  contingencyStats[ , log10P := phyper(whiteBallsDrawn-1, totalWhiteInUrn, totalBlackInUrn, totalBallsDrawn, lower.tail = FALSE, log.p = TRUE)/log(10)]
+  
+  contingencyStats[, TT := groupANDsetSize]
+  contingencyStats[, TF := groupSize - groupANDsetSize]
+  contingencyStats[, FT := setSize - groupANDsetSize]
+  contingencyStats[, FF := universeSize - FT - TF - TT]
+  contingencyStats[, oddsRatio := TT * FF/(TF * FT)]
+  
+  
+  return(contingencyStats[groupANDsetSize>=minMatchSize, .(cluster, ont, groupANDsetSize, groupSize, setSize, universeSize, oddsRatio, log10P, proteins)])
+}
+
+fastEnrichTableBestPerProtein <- function(enrich.dt){
+  perProtein <- enrich.dt[, .(protein = unlist(strsplit(geneID, "/"))), by= .(cluster, ID, GeneRatio, BgRatio, pvalue, p.adjust)]
+  setorder(perProtein, pvalue, na.last = TRUE)
+  perProtein[, symbol := multiUniprots2multiGenes(protein)]
+  bestPerProtein <- perProtein[, .SD[1], by = .(protein)]
+  return (bestPerProtein[])
+  
+}
+
+
+enrichTableBestPerProtein <- function(enrich.dt){
+  perProtein <- enrich.dt[, .(protein = unlist(strsplit(geneID, "/"))), by= .(cluster, ID, GeneRatio, BgRatio, pvalue, p.adjust)]
+  setorder(perProtein, pvalue, na.last = TRUE)
+  perProtein[, symbol := multiUniprots2multiGenes(protein)]
+  bestPerProtein <- perProtein[, .SD[1], by = .(protein)]
+  return (bestPerProtein[])
+}
+
+
+# for ordering of clusters:
+computeClusterCenters <- function(cluster.dt, mat){
+  .centerMassOne <- function(subMat){
+    sum(colSums(subMat) * 1:ncol(subMat))/sum(subMat)
+  }
+  
+  .centerMassOne <- function(subMat){
+    rowCenters <- apply(subMat, 1, function(x){sum((1:ncol(subMat)) * x)/sum(x)} )
+    median(rowCenters)
+  }
+  
+  
+  cluster.dt[, fractionCenter := .centerMassOne(mat[protein,]), by= cluster]
+}
+
+computeClusterMaxes <- function(cluster.dt, mat){
+  .peakClusterOne <- function(subMat){
+    as.numeric(median(peaksPerProtein <- apply(subMat,1, which.max)))
+  }
+  cluster.dt[, fractionMax := .peakClusterOne(mat[protein,]), by= cluster ]  
+}
+
+
+computeClusterSimilarityOrder <- function (cluster.dt, mat){
+  specialClusters <-  c("cluster.0000" , "cluster.xxxx")
+  splits <-split(cluster.dt[!cluster %in% specialClusters], by = "cluster")
+  cluster.mat <- do.call (rbind, lapply(splits, function(dt)colSums(mat[dt$protein,])))
+  
+  cor <- cor(t(cluster.mat))
+  
+  cor[is.na(cor)] <- -1
+  
+  ddr <- as.dendrogram( hclust(as.dist(1-cor)))
+  # desiredOrder based on fractionMax
+  desiredOrder <- cluster.dt[cluster %in% labels(ddr)][order (fractionMax), unique(cluster)]
+  ddr <- dendextend::rotate(ddr, desiredOrder)
+  
+  
+  
+  ordering <- order.dendrogram(ddr)
+  namesInOrder <- rownames(cor)[ordering]
+  ordering <- setNames(1:length(namesInOrder), namesInOrder)
+  
+  cluster.dt[, similarityOrder := ordering[cluster]]
+  for(specialCluster in specialClusters){
+    maxOrder <- max(cluster.dt$similarityOrder, na.rm = TRUE)
+    cluster.dt[cluster == specialCluster, similarityOrder := maxOrder + 1]
+  }
+}
+
+
+
+clusterOrderProteins <- function (cluster.dt, clustersOI = NULL){
+  if (is.null(clustersOI))clustersOI <- unique(cluster.dt$cluster)
+  specialClusterOffsets <- c("cluster.0000" = 1000, "cluster.xxxx" = 2000)
+
+  #cluster.dt[cluster %in% clustersOI][order(fractionMax)]$protein
+  # cluster.dt[cluster %in% clustersOI][order(ifelse(cluster %in% names(specialClusterOffsets),
+  #                                                  fractionCenter + specialClusterOffsets[cluster],
+  #                                                  fractionCenter))]$protein
+
+  cluster.dt[cluster %in% clustersOI][order(similarityOrder)]$protein
+  
+  }
+
+
+secHeatmap <- function (mat, cluster.dt, clustersOI = NULL, maxIntensity = 0.3){
+  csDenom <- 50/maxIntensity
+  proteinOrder <- clusterOrderProteins(cluster.dt, clustersOI)
+  sec.mat <- t(mat[proteinOrder,])
+  
+  hm.sec <- Heatmap(sec.mat,
+                    name = "Intensity (total scaled)",
+                    column_split = factor(cluster.dt[proteinOrder,, on = "protein"]$cluster,
+                                          levels = unique(cluster.dt[proteinOrder,, on = "protein"]$cluster)),
+                    column_gap = unit(0.1, "mm"),
+                    row_labels = ifelse(1:nrow(sec.mat) %% 5, "", 1:nrow(sec.mat)),
+                    cluster_rows = FALSE, cluster_columns = FALSE,
+                    col <- circlize::colorRamp2(breaks = (0:50)/csDenom, colors = viridis::magma(51,direction = -1)),
+                    show_column_names = FALSE, 
+                    column_title_rot = -90,
+                    column_title_gp = gpar(fontsize = 5),
+                    row_names_gp = gpar(fontsize = 6),
+                    
+                    #bottom_annotation = columnAnnotation(GOenrich = sqrt(cluster.dt[order(fractionCenter)]$bestPP)),
+                    height = unit(2,"inch"),
+                    use_raster = FALSE,
+                    heatmap_legend_param = list(direction = "horizontal"))
+  
+  return (hm.sec)
+}
+
+enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
+                          enrichColors = c(viridis::viridis(12, direction = -1)[1:12]) ){
+  proteinOrder <- clusterOrderProteins(cluster.dt, clustersOI)
+  # best enriched term per cluster
+  terms <- enrich.dt[order (log10P), .SD[1], by = cluster][10^log10P< minPValue, unique(ont)]
+  
+  perProteinEn.dt <- enrich.dt[ont %in% terms, 
+                               .(protein = unlist(strsplit(proteins, "/"))),
+                               by = .(cluster, ont, log10P)
+                               ] # any enrichment per protein
+  
+  enPG.mat <- dcast(perProteinEn.dt[ proteinOrder, , on = "protein"],
+                    protein~ont, value.var = "log10P") |>
+    as.matrix(rownames = "protein") |> t()
+  
+  enPG.mat <- enPG.mat[terms,] # removes the "NA"
+  
+  enPG.mat <- - enPG.mat
+  #enPG.mat[is.na(enPG.mat)] <- 0
+  
+  # order columns
+  enPG.mat <- enPG.mat[, proteinOrder]
+  
+  #order rows  
+  enPG.mat <- enPG.mat[order(apply(enPG.mat, 1, which.max)),]
+  
+  
+  hm.en <- Heatmap (sqrt(enPG.mat), name = "sqrt Enrichment",
+                    
+                    col = enrichColors,
+                    na_col = "grey95",
+                    
+                    
+                    show_column_names = FALSE, cluster_rows = FALSE,
+                    row_names_gp = gpar(fontsize = 7),
+                    row_split = factor(rownames(enPG.mat), levels = rownames(enPG.mat)),
+                    gap = unit(0.5, "mm"), row_title_rot = 0, 
+                    row_title_gp = gpar(fontsize = 7), cluster_columns = FALSE, use_raster = FALSE, 
+                    heatmap_legend_param = list(direction = "horizontal"))
+  return (hm.en)
+}
+
+
+
+
+
+
 # scaling ----
 
 
@@ -188,21 +782,50 @@ reorderMatricesByMaxFraction <- function(mats){
   return (mats)
   
 }
+
+
+interpolateMissingFractions <- function(matInput){
+  mat <- matInput
+  missingFractions <- which (apply(mat, 2, sum, na.rm = TRUE) == 0)
+  print (missingFractions)
+  #ignore the boundaries
+  missingFractions <- setdiff(missingFractions, c(1,ncol(mat)))
+  if (length(missingFractions) == 1){
+    missingFractions <- sort(missingFractions)
+    if (any(diff(missingFractions) > 1)){
+      stop("only single missing fractions implemented")
+    }
+    for (mf in missingFractions){
+      mat[, mf] <- (mat[, mf-1] + mat[, mf-2])/2
+    }
+    
+  }
+  return(mat)
+}
+
+
+
+
 # Heatmaps ----
 
-intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3,...){
+intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3, showRowNames = NULL,...){
   denom = 50 / topOfColorRange
   colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis::magma(51,direction = -1))
   samples <- names(intMats)
   
   sample <- samples[1]
+  
+  if (is.null(showRowNames)){
+    showRowNames <- nrow(intMats[[sample]]) < 100
+  }
+  
   hml <- Heatmap (intMats[[sample]] ,
                   name = intensityName,
                   cluster_rows = FALSE,
                   row_dend_reorder = FALSE,
                   cluster_columns = FALSE,
                   col = colorFun ,
-                  show_row_names = ifelse(nrow(intMats[[sample]]) > 100, FALSE, TRUE),
+                  show_row_names = (is.null(showRowNames) & nrow(intMats[[sample]]) > 100) | showRowNames,
                   row_names_side = "left",
                   column_names_gp = gpar(fontsize = 5),
                   column_labels = ifelse(as.integer(colnames(intMats[[sample]])) %% 5 == 0, colnames(intMats[[sample]]), ""),
@@ -666,7 +1289,7 @@ goldStandardPairs <- function (genes,
   
   #corum
   if (!is.null(corum.path)){
-    corumPairs <- unique(corumPairs(corum.path, geneAliasFunction)[, .(gene1, gene2)])
+    corumPairs <- unique(corumPairs(corum.path)[, .(gene1, gene2)])
   }else{
     corumPairs <- data.table (gene1 = c(), gene2 = c())
   }
