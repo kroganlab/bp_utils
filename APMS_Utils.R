@@ -145,9 +145,25 @@ roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown")
 
 
 
-roc.dt.groups <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown"), positiveLabels = "interactor", order= 1L, groupByColumns = c("") ){
-  totalPositive <- dt[label %in% positiveLabels, .(totalPositive = .N), by =groupByColumns]
-  totalNegative <- dt[label %in% negativeLabels, .(totalNegative = .N), by = groupByColumns]
+roc.dt.groups <- function(dt, scoreColumn = "p", 
+                          negativeLabels = c("decoy", "unknown"), 
+                          positiveLabels = "interactor", 
+                          order= 1L, groupByColumns = c(""),
+                          maxPositives = NULL, maxNegatives = NULL){
+  
+  # create group-specific totalPositive and totalNegative
+  if (is.null(maxPositives)){
+    totalPositive <- dt[label %in% positiveLabels, .(totalPositive = .N), by =groupByColumns]
+  }else{
+    totalPositive <- dt[, .(totalPositive = maxPositives), by = groupByColumns]
+  }
+  if (is.null(maxNegatives)){
+    totalNegative <- dt[label %in% negativeLabels, .(totalNegative = .N), by = groupByColumns]
+  }else{
+    totalNegative <- dt[, .(totalNegative = maxNegatives), by = groupByColumns]
+  }
+  
+  
   #setorderv(dt, scoreColumn, na.last = TRUE)
   dt[, scoreRank := frankv(.SD, scoreColumn, order = order), by = groupByColumns]
   rank2score <- unique(dt[, .SD , .SDcols = c(scoreColumn, "scoreRank"), by = groupByColumns])
