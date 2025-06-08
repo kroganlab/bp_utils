@@ -96,8 +96,9 @@ computeZmadex <- function (int.full) {
   preyTables <- split (int.full , by = "preyProtein")
   
   print ("imputing...")
+  lowImputeValue <- quantile(int.full$log2Intensity, 0.01, na.rm = TRUE) 
   suppressWarnings(
-    purrr::walk(preyTables, replaceNAByModelingOnPartlyMissing, .progress = "Imputing NAs...")
+    purrr::walk(preyTables, replaceNAByModelingOnPartlyMissing, .progress = "Imputing NAs...", minOverall = lowImputeValue)
   )
   
   print ("mad median and Zmadex calculations...")
