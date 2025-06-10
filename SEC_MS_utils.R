@@ -2082,3 +2082,72 @@ MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCo
   stopifnot(nrow(sec.dt) == nrow(secLong.dt))
   return(sec.dt)
 }
+
+
+#' function to interpolate missing values for missing/outlier fractions
+#' requires a sec.dt (longformat) with sample, treatment, replicate and intensity columns
+#' requires a qc.dt generated from the qcSummaryTable() function
+#' datatable join to replace values in problematic fractions with NA
+#' maxGap; treshold for N consec missing values for interpolation default is 1
+interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, maxGap=1){
+  
+  # create copy to avoid modifying ori DT
+  sec.dt <- copy(secLong.dt)
+  # zero out the intensities of problematic/missing fractions
+  sec.dt[, ori.intensity := intensity]
+  sec.dt[qc.dt[isOutlier == TRUE], on=.(sample, fraction), intensity := NA]
+  
+  # add NA cols for missing fractions
+  .addMissingFractions <- function(subDT){
+    subMat <- dcast(subDT, protein~fraction, value.var='intensity') %>% 
+      as.matrix(rownames='protein')
+    
+    if (!all(colnames(subMat) == fractions)){
+      message('Some fractions are missing. Adding missing fractions populated with NA...')
+      message('Missing fractions:\n', setdiff(fractions, colnames(subMat)))
+      subMat <- subMat[, match(fractions, colnames(subMat)), drop=FALSE] #missing fractions assigned an NA col. drop=FALSE to avoid collapsing to vector
+      colnames(subMat) <- fractions
+    }
+    return(subMat)
+  }
+  
+  .interpolateOutlierFractions <- function(subMat, sampleOI){
+    # interpolate intensity values in matrix rows
+    interpMat <- apply(subMat, 1, function(x) zoo::na.approx(x, na.rm=F, maxgap=maxGap)) %>% 
+      t()
+    # fractions to update; restrict to outlier and/or missing
+    fractionsOI <- c(qc.dt[sample == sampleOI & isOutlier == TRUE, unique(fraction)],
+                     setdiff(fractions, sec.dt[sample == sampleOI, unique(fraction)])
+                     )
+    
+    message('Handling problematic fractions for ', sampleOI, ': ', paste0(fractionsOI, collapse=','))
+    colsToupdate <- colnames(subMat) %in% fractionsOI
+    
+    # now apply the values from the interpolated matrix to the original
+    subMat[, colsToupdate] <- interpMat[, colsToupdate]
+    subdt <- setDT(reshape2::melt(subMat))
+    setnames(subdt, new=c('protein', 'fraction', 'intensity'))
+    
+    # add a flag to identify if the value is interpolated
+    subdt[, interpolated := FALSE]
+    subdt[fraction %in% fractionsOI, interpolated := TRUE]
+    return(subdt)
+  }
+
+  # handling missing/outlir fractions
+  sec.list <- pbapply::pblapply(split(sec.dt, sec.dt$sample), .addMissingFractions)
+  
+  # interpolate missing values
+  message('interpolating missing values...')
+  interp.list <- pbapply::pblapply(names(sec.list), function(n){.interpolateOutlierFractions(subMat = sec.list[[n]], sampleOI = n)}) 
+  names(interp.list) <- names(sec.list)
+  interp.dt <- rbindlist(interp.list, idcol='sample')
+  
+  interp.dt <- merge(x=interp.dt, y=sec.dt[, -c('intensity')], by=c('protein', 'sample', 'fraction'), all.x=T)
+  
+  # santy checks
+  #  nrows for non-missing fractions and intensity vals for non-interpolated should match between input and output
+  stopifnot( nrow(interp.dt[qc.dt, , on=.(sample, fraction)]) == nrow(sec.dt))
+  stopifnot( nrow(interp.dt[interpolated == FALSE & (intensity != ori.intensity), ]) == 0 )
+  return(interp.dt[, -c('ori.intensity')]) 
+}
