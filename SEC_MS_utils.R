@@ -330,7 +330,7 @@ qcProteinOverlapByFractionPlot <- function (overlap.dt,
                                             treatmentColors = c("#E41A1C", "#377EB8", "#4DAF4A", 
                                                                 "#984EA3", "#FF7F00", # "#FFFFFF",
                                                                 "#A65628", "#F781BF", "#999999")){
-  p <- ggplot(proteinOverlap[ref.sample != other.sample & ref.fraction == other.fraction],
+  p <- ggplot(overlap.dt[ref.sample != other.sample & ref.fraction == other.fraction],
               aes(x = ref.fraction, y = jaccard, color = other.treatment)) +
     geom_line( aes(lty = other.treatment != ref.treatment,  alpha = other.treatment != ref.treatment, group = interaction(ref.sample, other.sample)))  +
     theme_bw() +
@@ -694,12 +694,9 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 # scaling ----
 
 
-
-
 scaleByTotalIntensity <- function(secLong.dt){
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
 }
-
 
 scaleByMaxIntensity <- function(secLong.dt){
   secLong.dt[, intensity_maxScaled := intensity/(max(intensity, na.rm = TRUE)), by= .(sample, protein)]
@@ -714,14 +711,25 @@ scaleByMaxIntensity_global <- function(secLong.dt){
 
 #' @param scaleDenom total/max. What to use for the denominator for scaled intensity, total=sum(intensity) or max(intensity)
 
-scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE){
-  if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(secLong.dt))
-    scaleByTotalIntensity(secLong.dt)
-  if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(secLong.dt))
-    scaleByMaxIntensity(secLong.dt)
+scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE, useInterpolated=FALSE){
 
-  
-  allProteins <- unique(secLong.dt$protein)
+  sec.dt <- copy(secLong.dt)
+
+  # reset to ensure intended ints vals (interpolated/no interpolation) used 
+  sec.dt[, c('intensity_maxScaled', 'intensity_totalScaled') := NULL]
+
+  if(useInterpolated){
+    message("Warning: Including interpolated values for missing & outlier fractions\nYou may want to remove these values from differential analysis by setting useInterpolated=FALSE")
+  } else {
+    sec.dt[interpolated == TRUE, intensity := NA]
+  }
+
+  if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(sec.dt))
+    scaleByTotalIntensity(sec.dt)
+  if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(sec.dt))
+    scaleByMaxIntensity(sec.dt)
+
+  allProteins <- unique(sec.dt$protein)
   
   v_var <- ifelse(scaleDenom != "none", sprintf("intensity_%sScaled", scaleDenom), 'intensity')
   
@@ -731,10 +739,10 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
     mat[order(rownames(mat)),]
   }
   
-  mats <- lapply(split(secLong.dt, secLong.dt$sample), .oneMatrix )
+  mats <- lapply(split(sec.dt, sec.dt$sample), .oneMatrix )
   
   if (reorder){
-    proteinMaxFractions <- secLong.dt[, .(maxFraction = fraction[which.max(intensity)]), by= .(sample, protein)][, .(meanMaxFraction = mean(maxFraction, na.rm = TRUE)), by = protein]
+    proteinMaxFractions <- sec.dt[, .(maxFraction = fraction[which.max(intensity)]), by= .(sample, protein)][, .(meanMaxFraction = mean(maxFraction, na.rm = TRUE)), by = protein]
     rowOrdering <- proteinMaxFractions[rownames(mats[[1]]), order(meanMaxFraction), on = "protein"]
     
     mats <- lapply(mats, function(x)x[rowOrdering,])
@@ -2150,4 +2158,52 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   stopifnot( nrow(interp.dt[qc.dt, , on=.(sample, fraction)]) == nrow(sec.dt))
   stopifnot( nrow(interp.dt[interpolated == FALSE & (intensity != ori.intensity), ]) == 0 )
   return(interp.dt[, -c('ori.intensity')]) 
+}
+
+
+#' get pairwise distances between proteins in the corum database
+#' Option to use the given db to calculate distances or base distances on STRING network
+calculatePPIDistancesInNetwork <- function(corum.db.path=NULL, 
+                                           geneIDs=NULL,
+                                           useSTRINGdistances=F, 
+                                           string.links.path=NULL,
+                                           string.info.path=NULL,
+                                           stringCombinedScoreThreshold = 600
+                                           ){
+  
+  # load STRING as ppi dt
+  .loadSTRINGPPI<- function(string.links.path, string.info.path){
+    string.dt <- fread(string.links.path)[combined_score > stringCombinedScoreThreshold,]
+    string.anno <- fread(string.info.path)
+    # annotate with gene name
+    string.dt[string.anno, gene1 := i.preferred_name, on=c(protein1 = "#string_protein_id")]
+    string.dt[string.anno, gene2 := i.preferred_name, on=c(protein2 = "#string_protein_id")]
+    
+    string.dt <- string.dt[gene1 < gene2, .(gene1, gene2)]
+    return(string.dt)
+  }
+  
+  if (useSTRINGdistances && (is.null(string.links.path) |is.null(string.links.path))){
+    stop('No STRING database path/info provided. Exiting...')
+
+  } else if (useSTRINGdistances && (!is.null(string.links.path) && !is.null(string.links.path))){
+    
+    message('Calculating pairwise distances on STRING network...')
+    string.db <- .loadSTRINGPPI(string.links.path, string.info.path)
+    ppi.dt <- string.db
+  } else {
+    message('Calculating pairwise distances on CORUM database...')
+    ppi.dt <- corumPairs(corum.db.path)
+  }
+  
+  g <- igraph::graph_from_data_frame(ppi.dt, directed = F)
+  # all-vy-all shortest paths calculation
+  distMat <- igraph::distances(g)
+  distMat <- distMat[rownames(distMat) %in% geneIDs, colnames(distMat) %in% geneIDs]
+  dist.dt <- as.data.table(reshape2::melt(distMat)) %>% 
+    .[value != 0]
+  setnames(dist.dt, new=c('gene1', 'gene2', 'numberOfHops'))
+  cols.oi <- c('gene1', 'gene2')
+  dist.dt[, c(cols.oi) := lapply(.SD, as.character), .SDcols=cols.oi]
+  return(dist.dt[gene1 < gene2])
 }
