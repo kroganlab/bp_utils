@@ -719,10 +719,11 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
     scaleByTotalIntensity(secLong.dt)
   if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(secLong.dt))
     scaleByMaxIntensity(secLong.dt)
+
   
   allProteins <- unique(secLong.dt$protein)
   
-  v_var <- sprintf("intensity_%sScaled", scaleDenom)
+  v_var <- ifelse(scaleDenom != "none", sprintf("intensity_%sScaled", scaleDenom), 'intensity')
   
   .oneMatrix <- function(sub.dt){
     mat <- dcast(sub.dt, protein~fraction, value.var = v_var)[allProteins,, on = "protein"] |> as.matrix(rownames = "protein")
@@ -1965,6 +1966,7 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
   
   lmout <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
   lmout.noInteraction <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)+treatment, onePeakSec.dt)
+ 
   
   #onePeakSec.dt[, fitted := 2^predict(lmout)]
   
@@ -1983,7 +1985,7 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
     if ("function" %in% class(doPlotFunction)){doPlotFunction(p)}else{print(p)}
     
   }
-  return (anova(lmout))
+  return(data.frame(anova(lmout)))
 }
 
 
@@ -2031,3 +2033,52 @@ subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
 # }
 
 
+
+## MG functions
+
+#' return column with max consecutive detections per protein
+MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCol='intensity', detectionCutoff=0, plot=F){
+  
+  .oneMatrix <- function(sub.dt){
+    mat <- dcast(sub.dt, sub.dt[[idcol]]~fraction, value.var = intsCol) %>% 
+      as.matrix(rownames = 1)
+    mat[is.na(mat)] <- 0.0
+    mat[order(rownames(mat)),]
+  }
+  
+    #' Identify the max run of consecutive measurmeents
+  .maxConsecFractionMeasurments <- function(row, cutoff=detectionCutoff){
+    detectVec <- rle(row > cutoff)
+    return(max(detectVec$lengths[detectVec$values == TRUE]))
+  }
+  
+  # one matrix per sample 
+  mats <- lapply(split(secLong.dt, list(secLong.dt$sample)), .oneMatrix)
+  
+  consec.dt <- pbapply::pblapply(mats, function(x) {
+    apply(x, 1, function(feature){ .maxConsecFractionMeasurments(row = feature, cutoff = detectionCutoff) }) %>% 
+    as.data.table(keep.rownames=T)
+  }) %>% 
+  rbindlist(idcol='sample')
+
+  setnames(consec.dt, new=c('sample', 'feature', 'consecutiveDetections'))
+ 
+  if (plot){
+    
+    g <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
+      stat_ecdf() +
+      labs(title='Distribution of maximum consecutive detections per protein') +
+      theme_bw()
+    
+    p <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
+      geom_density() +
+      labs(title='Distribution of maximum consecutive detections per protein') +
+      theme_bw()
+ 
+    print(p); print(g)
+  }
+  
+  sec.dt <- merge(x=secLong.dt, y=consec.dt, by.x=c('sample', idcol), by.y=c('sample', 'feature'), all.x=T)
+  stopifnot(nrow(sec.dt) == nrow(secLong.dt))
+  return(sec.dt)
+}
