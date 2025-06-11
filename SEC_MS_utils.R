@@ -2160,7 +2160,6 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   return(interp.dt[, -c('ori.intensity')]) 
 }
 
-
 #' get pairwise distances between proteins in the corum database
 #' Option to use the given db to calculate distances or base distances on STRING network
 calculatePPIDistancesInNetwork <- function(corum.db.path=NULL, 
@@ -2206,4 +2205,82 @@ calculatePPIDistancesInNetwork <- function(corum.db.path=NULL,
   cols.oi <- c('gene1', 'gene2')
   dist.dt[, c(cols.oi) := lapply(.SD, as.character), .SDcols=cols.oi]
   return(dist.dt[gene1 < gene2])
+}
+
+generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
+                                            ppi_distances=NULL,
+                                            decoy_min_distance=3,
+                                            quantile_threshold=0.1,
+                                            min_complex_size=2,
+                                            retries=3){
+  
+  # database ppi
+  corum.dt <- fread(corum.db.path)[, .(gene = unlist(strsplit(subunits_gene_name, ";"))), by=.(complex_id, complex_name)]
+  corum.dt[, complex_size := length(unique(gene)), by=complex_id]
+
+  corumInfo <- corum.dt[, .(complex_id, complex_size)] %>% 
+    .[complex_size >= min_complex_size,] %>% 
+      unique()
+  
+  # subset to distant proteins
+  ppi_distances <- ppi_distances[is.finite(nHops) & nHops >= decoy_min_distance] 
+  allGenes <- ppi_distances[, c(gene1, gene2)]
+
+  # function to create decoy complexes... needs review and can be improved
+  # build a connected graph and seacrch more robust and efficient??
+  .makeDecoyComplex <- function(compID, featureIDs, ppi_distances=ppi_distances, retries=retries, decoy_min_distance, quantile_threshold){
+    
+    size <- corumInfo[complex_id == compID, complex_size]
+    tries <- 0
+    goodDecoySet <- FALSE 
+    
+    while (tries < retries & goodDecoySet == FALSE){
+      
+      genes <- sample(featureIDs, size, replace=F)
+      
+      # previously doing logical filtering but too slow..
+      # make a dt of all possible combos and do a merge
+      gene_pairs <- t(combn(genes, 2))
+      pairs_dt <- data.table(gene1 = pmin(gene_pairs[,1], gene_pairs[,2]),
+                             gene2 = pmax(gene_pairs[,1], gene_pairs[,2]))
+      pairs_dt <- merge(pairs_dt, ppi_distances, by = c("gene1", "gene2"), all.x = TRUE)
+      min_hops <- quantile(pairs_dt$nHops, probs=quantile_threshold, na.rm=T)
+    
+      # either distance exceeds thresh, or no edges
+      if (min_hops >= decoy_min_distance | is.na(min_hops)){
+        goodDecoySet <- TRUE
+        break
+      } else {
+        tries <- tries + 1 
+        genes <- NULL # reset
+      }
+    }
+    if(is.null(genes)){
+      stop("Did not sample ", size, " genes passing ", decoy_min_distance, " distance threshold in ", retries, " retries.\nConsider increasing number of retries and/or reducing the distance threshold")
+    } else {
+      dt <- data.table(complex_id = paste0("decoy_", compID),
+                       complex_name = paste0("decoy_", compID),
+                       complex_size = size,
+                       gene = genes)
+      return(dt)
+    }
+  }
+  message('preparing decoy complexes...')
+  # pbmclappy to use multiple cores
+  cores <- parallel::detectCores() - 2
+  # apply this to each complex
+  #decoys.dt <- pbapply::pblapply(corumInfo[, complex_id],  function(comp) {.makeDecoyComplex(compID = comp, 
+  decoys.dt <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
+                                                                             featureIDs = allGenes, 
+                                                                             ppi_distances = ppi_distances,
+                                                                             retries = retries, 
+                                                                             decoy_min_distance = decoy_min_distance,
+                                                                             quantile_threshold = quantile_threshold
+                                                                             )}, mc.cores = cores) %>% 
+    rbindlist()
+  
+  comb.dt <- rbind(corum.dt, decoys.dt)
+  comb.dt[, decoy := FALSE]
+  comb.dt[grepl('decoy', complex_id), decoy := TRUE]
+  return(comb.dt)
 }
