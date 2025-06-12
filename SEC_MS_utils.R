@@ -2041,8 +2041,9 @@ subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
 # }
 
 
-
-## MG functions
+######
+## MG additional functions
+#####
 
 #' return column with max consecutive detections per protein
 MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCol='intensity', detectionCutoff=0, plot=F){
@@ -2191,7 +2192,7 @@ calculatePPIDistancesInNetwork <- function(corum.db.path=NULL,
     string.db <- .loadSTRINGPPI(string.links.path, string.info.path)
     ppi.dt <- string.db
   } else {
-    message('Calculating pairwise distances on CORUM database...')
+    message('Calculating pairwise distances on CORUM network...')
     ppi.dt <- corumPairs(corum.db.path)
   }
   
@@ -2207,6 +2208,12 @@ calculatePPIDistancesInNetwork <- function(corum.db.path=NULL,
   return(dist.dt[gene1 < gene2])
 }
 
+#' Generate both target and decoy complexes from a PPI datatable 
+#' Currently random sample proteins and checks all-by-all shortest paths meet distance threshold 
+#' Possibly faster/more robust graph-based methods? Discuss with BP...
+#' @param corum.db.path path to database (CORUM format)
+#' @param ppi_distances path to data.table of pairwise distances between proteins with cols c(protein1, protein2, nHops). protein lexicographically sorted (protein1 < protein2)
+#' @returns data.table of target and decoy (1:1 ratio) complexes in PPI format
 generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
                                             ppi_distances=NULL,
                                             decoy_min_distance=3,
@@ -2226,8 +2233,6 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
   ppi_distances <- ppi_distances[is.finite(nHops) & nHops >= decoy_min_distance] 
   allGenes <- ppi_distances[, c(gene1, gene2)]
 
-  # function to create decoy complexes... needs review and can be improved
-  # build a connected graph and seacrch more robust and efficient??
   .makeDecoyComplex <- function(compID, featureIDs, ppi_distances=ppi_distances, retries=retries, decoy_min_distance, quantile_threshold){
     
     size <- corumInfo[complex_id == compID, complex_size]
@@ -2238,15 +2243,15 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
       
       genes <- sample(featureIDs, size, replace=F)
       
-      # previously doing logical filtering but too slow..
-      # make a dt of all possible combos and do a merge
+      # previously doing DT filtering but too slow..
+      # generate all possible pw combos and do a merge
       gene_pairs <- t(combn(genes, 2))
       pairs_dt <- data.table(gene1 = pmin(gene_pairs[,1], gene_pairs[,2]),
                              gene2 = pmax(gene_pairs[,1], gene_pairs[,2]))
       pairs_dt <- merge(pairs_dt, ppi_distances, by = c("gene1", "gene2"), all.x = TRUE)
-      min_hops <- quantile(pairs_dt$nHops, probs=quantile_threshold, na.rm=T)
+      min_hops <- quantile(pairs_dt$nHops, probs=quantile_threshold, na.rm=T) 
     
-      # either distance exceeds thresh, or no edges
+      # either min distance or no edges to keep genelist, or reset
       if (min_hops >= decoy_min_distance | is.na(min_hops)){
         goodDecoySet <- TRUE
         break
@@ -2268,8 +2273,6 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
   message('preparing decoy complexes...')
   # pbmclappy to use multiple cores
   cores <- parallel::detectCores() - 2
-  # apply this to each complex
-  #decoys.dt <- pbapply::pblapply(corumInfo[, complex_id],  function(comp) {.makeDecoyComplex(compID = comp, 
   decoys.dt <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
                                                                              featureIDs = allGenes, 
                                                                              ppi_distances = ppi_distances,
@@ -2283,4 +2286,53 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
   comb.dt[, decoy := FALSE]
   comb.dt[grepl('decoy', complex_id), decoy := TRUE]
   return(comb.dt)
+}
+
+### TODOs
+
+## Complex Detection
+#' in progress..
+#' Subset to goodPeak set
+#' Do an all-by-all peak-correlation for all coeluting members per peak
+#' summarize peak correlation metrics (-log10Cor), mean, sd, min, max?
+#' confidence score? some composite of corScore, peak tightness (cofmN_sd), n detected complex members.
+#' Bayesian prior: include structural PPI score and GO similariy (semantic).
+#' Compare the decoy complex scores vs the target complex scores to define an FDR.
+
+## Complex Differential Analysis
+#' sum intensiies or robust median across complex members and use same ANOVA algorithm
+#' 
+
+#' Plotting 
+#' Heatmap, coelution plot funcitons 
+
+#' Use the peak detection table to filter out hypothesis/complexes to just those with min.members coeluting (goodPeaks)
+#' clusterPeaks; on inpsection some members have a slight offset (peakLoc +/- 1); currently clustering peaks to account for these slight differences..
+#' cofmN_sd to assess spread around complex peak center
+#' not sure on other metrics.. CALOS!!... need to think on this but generate everything for now...
+detectProteinComplexCoelutions <- function(comp_id, complex.dt, peakTable, maxDistance=2, min.members=2){
+  
+  peaks.dt <- copy(peakTable)
+  members <- complex.dt[complex_id == comp_id, unique(protein)]
+  
+  complex.info <- peaks.dt[protein %in% members & goodPeak] %>% 
+    .[, peakCluster := clusterPeaks(peakLocation,  maxDistance = maxDistance),]
+  
+  complex.info <- complex.info[,.(peakLocations = paste0(unique(peakLocation), collapse=';'),
+                                  complex_id = comp_id,
+                                  complex_name = complex.dt[complex_id == comp_id, unique(complex_name)],
+                                  members=paste0(members, collapse=";"),
+                                  nMembers = length(members),
+                                  CoelutingMembers=paste0(protein, collapse=";"),
+                                  nCoelutingMembers=.N,                                  peakHeight_mean = mean(peakHeight, na.rm=T),
+                                  peakHeight_sd = sd(peakHeight, na.rm=T),
+                                  cofmN_mean=mean(cofmN.standardized, na.rm=T),
+                                  cofmN_sd=sd(cofmN.standardized, na.rm=T), # this or standardised?
+                                  cv_mean=mean(cv, na.rm=T), # not sure on these
+                                  cv_sd=sd(cv, na.rm=T),
+                                  var_man=mean(var, na.rm=T),
+                                  var_sd = sd(var, na.rm=T))
+                                  , by=peakCluster]
+  
+  return(complex.info[nCoelutingMembers >= min.members])
 }
