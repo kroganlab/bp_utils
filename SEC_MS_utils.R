@@ -2288,33 +2288,23 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
   return(comb.dt)
 }
 
-### TODOs
 
 ## Complex Detection
-#' in progress..
 #' Subset to goodPeak set
-#' Do an all-by-all peak-correlation for all coeluting members per peak
-#' summarize peak correlation metrics (-log10Cor), mean, sd, min, max?
-#' confidence score? some composite of corScore, peak tightness (cofmN_sd), n detected complex members.
-#' Bayesian prior: include structural PPI score and GO similariy (semantic).
-#' Compare the decoy complex scores vs the target complex scores to define an FDR.
-
-## Complex Differential Analysis
-#' sum intensiies or robust median across complex members and use same ANOVA algorithm
-#' 
-
-#' Plotting 
-#' Heatmap, coelution plot funcitons 
+#' Do an all-by-all peak-correlation for all coeluting members per peak (currently taking peakCor)
+#' summarize peak correlation metrics (-log10Cor)... also maybe look at peak features?
+#' Compare the decoy complex scores vs the target complex scores to define an FDR threshold for 'good' Complexes.
 
 #' Use the peak detection table to filter out hypothesis/complexes to just those with min.members coeluting (goodPeaks)
-#' clusterPeaks; on inpsection some members have a slight offset (peakLoc +/- 1); currently clustering peaks to account for these slight differences..
+#' clusterPeaks; currently clustering peaks to account..
 #' cofmN_sd to assess spread around complex peak center
-#' not sure on other metrics.. CALOS!!... need to think on this but generate everything for now...
-detectProteinComplexCoelutions <- function(comp_id, complex.dt, peakTable, maxDistance=2, min.members=2){
+#' not sure on other metrics..need to think on this but generate everything for now...
+detectComplexCoelutingPeaks <- function(comp_id, complex.dt, peakTable, maxDistance=2, min.members=2){
   
   peaks.dt <- copy(peakTable)
   members <- complex.dt[complex_id == comp_id, unique(protein)]
   
+  # subset to goodPeaks and cluster? I *think* it might make sense to grp proteins with peaks radius +/- 1
   complex.info <- peaks.dt[protein %in% members & goodPeak] %>% 
     .[, peakCluster := clusterPeaks(peakLocation,  maxDistance = maxDistance),]
   
@@ -2336,3 +2326,62 @@ detectProteinComplexCoelutions <- function(comp_id, complex.dt, peakTable, maxDi
   
   return(complex.info[nCoelutingMembers >= min.members])
 }
+
+summarizeCoelutingComplexes <- function(comp_id, complexes.toScore.dt, cor.dt){
+  
+  # cp & tidy peakCor 
+  peakCor.dt <- copy(cor.dt)
+  print(peakCor.dt)
+  
+  char.vec <- c('protein1', 'protein2')
+  cor.dt[, c(char.vec) := lapply(.SD, as.character), .SDcols=char.vec]
+  cor.dt <- cor.dt[protein1 < protein2,]
+  setkeyv(cor.dt, c('protein1', 'protein2'))
+
+  members <- complexes.toScore.dt[complex_id == comp_id, unique(unlist(strsplit(CoelutingMembers, '[;]')))]
+  colsToKeep <- setdiff(colnames(complexes.toScore.dt), 'peakLocations')
+
+  complexes.toScore.dt[, c("peakStart", "peakEnd") := { peaks <- as.numeric(unlist(strsplit(peakLocations, ";"))); list(min(peaks), max(peaks)) }, by = .(complex_id, peakCluster)]
+  
+  # prepare a dt for merging; need to also merge by peakLocation to ensure we are only scoring co-eluting peaks
+  prot.pairs <- t(combn(members, 2))
+  comp.pairs <- data.table(complex_id = as.character(comp_id),
+                           protein1 = pmin(prot.pairs[,1], prot.pairs[,2]),
+                           protein2 = pmax(prot.pairs[,1], prot.pairs[,2]))
+  setkeyv(comp.pairs, c('protein1', 'protein2'))
+  
+  # inner join faster subset than logical filtering 
+
+  complex.cor.dt <- cor.dt[comp.pairs, on=.(protein1, protein2)]
+  print(complex.cor.dt)
+  #message("subsetting to complex coelutions detected")
+  
+  # subset to best correlated peaks per PPI, and summarize corScore
+  complex.cor.dt <- complex.cor.dt[, .SD[which.max(corScore)], by=.(protein1, protein2, prot1Peak, prot2Peak)]
+  
+  # join all, then filter based on peak range
+  merge.complex.cor.dt <- merge(y=complex.cor.dt, x=complexes.toScore.dt[complex_id == comp_id], by="complex_id", allow.cartesian = TRUE)
+  merge.complex.cor.dt <- merge.complex.cor.dt[prot1Peak >= peakStart & prot1Peak <= peakEnd &prot2Peak >= peakStart & prot2Peak <= peakEnd]
+
+  # now we want to summarize scores per cluster. Sum scores per peak per Cluster, then select the best score
+  # can decide how to summarize across peak; I think for now we might actually want to keep all complex peaks for potential differential testing?
+  merge.complex.cor.dt <- merge.complex.cor.dt[, .(members, 
+                                                   nMembers,
+                                                   CoelutingMembers, 
+                                                   completeness = nCoelutingMembers/nMembers,
+                                                   corScore_sum = sum(corScore, na.rm=T),
+                                                   corScore_mean = mean(corScore, na.rm=T),
+                                                   corScore_sd = sd(corScore, na.rm=T),
+                                                   corScore_min = min(corScore, na.rm=T),
+                                                   corScore_max = max(corScore, na.rm=T),
+                                                   decoy
+                                                   ),by=.(complex_id, complex_name, decoy, peakCluster)] %>% 
+    unique()
+  
+  return(merge.complex.cor.dt)
+}
+
+## TODO
+#filter complexes by expected elution mass (are all members of the complex eluting at heavier than monomeric?)
+#heatmaps, elution plot funcitons
+# ppi-scoring include structural ppi score prior 
