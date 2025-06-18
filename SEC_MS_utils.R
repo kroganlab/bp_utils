@@ -2385,3 +2385,27 @@ summarizeCoelutingComplexes <- function(comp_id, complexes.toScore.dt, cor.dt){
 #filter complexes by expected elution mass (are all members of the complex eluting at heavier than monomeric?)
 #heatmaps, elution plot funcitons
 # ppi-scoring include structural ppi score prior 
+
+
+# correlation heatmap see  https://jokergoo.github.io/ComplexHeatmap-reference/book/a-single-heatmap.html#customize-the-heatmap-body
+plotSampleCorrelationHeatmap <- function(cor.mat,...){
+  #enforce same row and column ordering
+  od =  hclust(dist(cor.mat))$order
+  cm = cor.mat[od, od]
+
+  hm <- Heatmap(cm,
+                name='Sample Pearson Corr.',
+                rect_gp = gpar(type = "none"), 
+                cluster_rows = F, 
+                cluster_columns = F,
+                column_names_gp = gpar(fontsize=8),
+                row_names_gp = gpar(fontsize=8),
+	              cell_fun = function(j, i, x, y, w, h, fill) {
+		            if(i >= j) {
+		              grid.rect(x, y, w, h, gp = gpar(fill = fill, col = fill))
+		              grid.text(sprintf("%.2f", cm[i, j]), x, y, gp = gpar(fontsize = 6, col='white'))
+		              }
+	             },
+		            ...)
+  return(draw(hm))
+}
