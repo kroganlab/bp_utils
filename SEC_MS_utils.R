@@ -2409,3 +2409,87 @@ plotSampleCorrelationHeatmap <- function(cor.mat,...){
 		            ...)
   return(draw(hm))
 }
+
+
+## CCprofiler-related utility functions. Format sec.long tables for use with the CCprofiler tool
+prepareTracesProteinAnnotation <- function(uniprot_path='~/Documents/utils/mg_utils/data/uniprotkb_reviewed_true_2025_05_13.tsv.gz'){
+  
+  if (file.exists(uniprot_path)){
+    uniprot.txt <- fread(uniprot_path)
+  }
+  # tidy col names 
+  uniprot.txt <- uniprot.txt[Organism == 'Homo sapiens (Human)', .(id=Entry, protein_id=Entry, Entry_name=`Entry Name`, 
+                                                                   Status='reviewed', Protein_names=`Protein names`,  
+                                                                   Gene_names=`Gene Names`, Organism, Length, Mass, GO_ID=`Gene Ontology IDs`, protein_mw=(Mass/1000), Decoy=0)]
+  return(uniprot.txt)
+}
+#examlpe
+#prepareTracesProteinAnnotation('~/Documents/utils/mg_utils/data/uniprotkb_reviewed_true_2025_05_13.tsv.gz')
+
+prepareTracesIntensity <- function(sec.dt, splitCol='sample', intsCol='intensity', useInterpolated=FALSE){
+  
+  dt <- copy(sec.dt)
+  
+  if (useInterpolated == FALSE){
+    dt[interpolated == TRUE, eval(intsCol) := NA]
+  } else {
+    message('Warning: including interpolated values.\nIf you wish to disable, use the `useInterpolated=FALSE`')
+  }
+  
+  ints.dt <- dcast(dt, protein~fraction, value.var = eval(intsCol))
+  # convert NA to 0
+  ints.long <- setDT(reshape2::melt(ints.dt, id.vars='protein'))
+  ints.long[is.na(value), value := 0]
+  
+  ints.dt <- dcast(ints.long, protein~variable, value.vars='value')
+  ints.dt[, id := protein]
+  ints.dt[, protein := NULL]
+  
+  # check fraction ordering
+  if(all(colnames(ints.dt) == c(seq(1, max(dt$fraction),1), 'id')) != TRUE)
+    stop('Missing fractions in input datatable...\nPlease handle these missing fractions before running.\nExiting...')
+  
+  return(ints.dt)
+}
+# example
+#ints.dt <- prepareTracesIntensity(sec.dt = sec.long[sample=='Infected_3',], useInterpolated = FALSE)
+
+
+prepareTracesFractionAnnotation <-  function(sec.long, mw_path='/Users/martingordon/Documents/projects/061425_MMuralidharan_HIVdonor23_SECMS/data/HIV_Infection_CD4T_cells/SEC_Profiles/D1-D3-cal_SRT.txt'){
+  
+  dt <- copy(sec.long)
+  
+  if (file.exists(mw_path)){
+    mw <- fread(mw_path)
+    print(mw)
+  }
+  setnames(mw, new=c('fraction', 'mw'))
+  
+  mc <- calculateFractionMassConverters(mw)
+  mw.dt <- sec.long[, .(filename=paste0(sample,'.fraction',fraction), id=fraction, molecular_weight=mc$fraction2Mass(fraction))] %>% 
+    unique()
+  return(mw.dt)
+}
+# example
+#mw.traces <- prepareTracesFractionAnnotation(sec.long = sec.long[sample=='Infected_3'])
+
+#' Note; CCprofiler throws an nambioguous error if protein order in ints mat (traces) and annotation dt do not match.
+#' Subset intesnity matrix to overlapping proteins. Warns rather than fails if overlaps do not match
+enforceTraceAndAnnotationRowOrder <- function(traces.obj){
+
+  mat  <- traces.obj$traces
+  anno <- traces.obj$trace_annotation
+  
+  # subset the mat to the set of proteins in the anno.dt
+  prot.overlaps <- intersect(mat$id, anno$protein_id)
+  submat <- mat[id %in% prot.overlaps,]
+  message(nrow(submat),  ' out of ', nrow(mat), ' rows match betweem the protein annotation and traces file\nSubsetting to the overlapping proteins')
+  
+  anno <- anno[id %in% prot.overlaps]
+  #match the row ordering between anno and ints
+  traces.obj$traces <- submat[match(anno$id, submat$id)]
+  traces.obj$trace_annotation <- anno
+  return(traces.obj)
+}
+
+traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)
