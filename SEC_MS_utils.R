@@ -331,7 +331,7 @@ qcProteinOverlapByFractionPlot <- function (overlap.dt,
                                             treatmentColors = c("#E41A1C", "#377EB8", "#4DAF4A", 
                                                                 "#984EA3", "#FF7F00", # "#FFFFFF",
                                                                 "#A65628", "#F781BF", "#999999")){
-  p <- ggplot(proteinOverlap[ref.sample != other.sample & ref.fraction == other.fraction],
+  p <- ggplot(overlap.dt[ref.sample != other.sample & ref.fraction == other.fraction],
               aes(x = ref.fraction, y = jaccard, color = other.treatment)) +
     geom_line( aes(lty = other.treatment != ref.treatment,  alpha = other.treatment != ref.treatment, group = interaction(ref.sample, other.sample)))  +
     theme_bw() +
@@ -695,10 +695,14 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 # scaling ----
 
 
+<<<<<<< HEAD
 
 
 scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = FALSE){
 
+=======
+scaleByTotalIntensity <- function(secLong.dt){
+>>>>>>> 06bb6887381ce678ee7ba5470909deef73729bc1
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
   
   
@@ -709,7 +713,6 @@ scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = 
   }
   return (secLong.dt)
 }
-
 
 scaleByMaxIntensity <- function(secLong.dt){
   secLong.dt[, intensity_maxScaled := intensity/(max(intensity, na.rm = TRUE)), by= .(sample, protein)]
@@ -724,15 +727,27 @@ scaleByMaxIntensity_global <- function(secLong.dt){
 
 #' @param scaleDenom total/max. What to use for the denominator for scaled intensity, total=sum(intensity) or max(intensity)
 
-scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE){
-  if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(secLong.dt))
-    scaleByTotalIntensity(secLong.dt)
-  if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(secLong.dt))
-    scaleByMaxIntensity(secLong.dt)
+scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE, useInterpolated=FALSE){
+
+  sec.dt <- copy(secLong.dt)
+
+  # reset to ensure intended ints vals (interpolated/no interpolation) used 
+  sec.dt[, c('intensity_maxScaled', 'intensity_totalScaled') := NULL]
+
+  if(useInterpolated){
+    message("Warning: Including interpolated values for missing & outlier fractions\nYou may want to remove these values from differential analysis by setting useInterpolated=FALSE")
+  } else {
+    sec.dt[interpolated == TRUE, intensity := NA]
+  }
+
+  if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(sec.dt))
+    scaleByTotalIntensity(sec.dt)
+  if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(sec.dt))
+    scaleByMaxIntensity(sec.dt)
+
+  allProteins <- unique(sec.dt$protein)
   
-  allProteins <- unique(secLong.dt$protein)
-  
-  v_var <- sprintf("intensity_%sScaled", scaleDenom)
+  v_var <- ifelse(scaleDenom != "none", sprintf("intensity_%sScaled", scaleDenom), 'intensity')
   
   .oneMatrix <- function(sub.dt){
     mat <- dcast(sub.dt, protein~fraction, value.var = v_var)[allProteins,, on = "protein"] |> as.matrix(rownames = "protein")
@@ -740,10 +755,10 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
     mat[order(rownames(mat)),]
   }
   
-  mats <- lapply(split(secLong.dt, secLong.dt$sample), .oneMatrix )
+  mats <- lapply(split(sec.dt, sec.dt$sample), .oneMatrix )
   
   if (reorder){
-    proteinMaxFractions <- secLong.dt[, .(maxFraction = fraction[which.max(intensity)]), by= .(sample, protein)][, .(meanMaxFraction = mean(maxFraction, na.rm = TRUE)), by = protein]
+    proteinMaxFractions <- sec.dt[, .(maxFraction = fraction[which.max(intensity)]), by= .(sample, protein)][, .(meanMaxFraction = mean(maxFraction, na.rm = TRUE)), by = protein]
     rowOrdering <- proteinMaxFractions[rownames(mats[[1]]), order(meanMaxFraction), on = "protein"]
     
     mats <- lapply(mats, function(x)x[rowOrdering,])
@@ -1980,6 +1995,7 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
   
   lmout <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)*treatment, onePeakSec.dt)
   lmout.noInteraction <- lm( log2_intensity_totalScaled~ poly(standardFraction, 4)+treatment, onePeakSec.dt)
+ 
   
   #onePeakSec.dt[, fitted := 2^predict(lmout)]
   
@@ -1998,7 +2014,7 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
     if ("function" %in% class(doPlotFunction)){doPlotFunction(p)}else{print(p)}
     
   }
-  return (anova(lmout))
+  return(data.frame(anova(lmout)))
 }
 
 
@@ -2046,3 +2062,455 @@ subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
 # }
 
 
+######
+## MG additional functions
+#####
+
+#' return column with max consecutive detections per protein
+MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCol='intensity', detectionCutoff=0, plot=F){
+  
+  .oneMatrix <- function(sub.dt){
+    mat <- dcast(sub.dt, sub.dt[[idcol]]~fraction, value.var = intsCol) %>% 
+      as.matrix(rownames = 1)
+    mat[is.na(mat)] <- 0.0
+    mat[order(rownames(mat)),]
+  }
+  
+    #' Identify the max run of consecutive measurmeents
+  .maxConsecFractionMeasurments <- function(row, cutoff=detectionCutoff){
+    detectVec <- rle(row > cutoff)
+    return(max(detectVec$lengths[detectVec$values == TRUE]))
+  }
+  
+  # one matrix per sample 
+  mats <- lapply(split(secLong.dt, list(secLong.dt$sample)), .oneMatrix)
+  
+  consec.dt <- pbapply::pblapply(mats, function(x) {
+    apply(x, 1, function(feature){ .maxConsecFractionMeasurments(row = feature, cutoff = detectionCutoff) }) %>% 
+    as.data.table(keep.rownames=T)
+  }) %>% 
+  rbindlist(idcol='sample')
+
+  setnames(consec.dt, new=c('sample', 'feature', 'consecutiveDetections'))
+ 
+  if (plot){
+    
+    g <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
+      stat_ecdf() +
+      labs(title='Distribution of maximum consecutive detections per protein') +
+      theme_bw()
+    
+    p <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
+      geom_density() +
+      labs(title='Distribution of maximum consecutive detections per protein') +
+      theme_bw()
+ 
+    print(p); print(g)
+  }
+  
+  sec.dt <- merge(x=secLong.dt, y=consec.dt, by.x=c('sample', idcol), by.y=c('sample', 'feature'), all.x=T)
+  stopifnot(nrow(sec.dt) == nrow(secLong.dt))
+  return(sec.dt)
+}
+
+
+#' function to interpolate missing values for missing/outlier fractions
+#' requires a sec.dt (longformat) with sample, treatment, replicate and intensity columns
+#' requires a qc.dt generated from the qcSummaryTable() function
+#' datatable join to replace values in problematic fractions with NA
+#' maxGap; treshold for N consec missing values for interpolation default is 1
+interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, maxGap=1){
+  
+  # create copy to avoid modifying ori DT
+  sec.dt <- copy(secLong.dt)
+  # zero out the intensities of problematic/missing fractions
+  sec.dt[, ori.intensity := intensity]
+  sec.dt[qc.dt[isOutlier == TRUE], on=.(sample, fraction), intensity := NA]
+  
+  # add NA cols for missing fractions
+  .addMissingFractions <- function(subDT){
+    subMat <- dcast(subDT, protein~fraction, value.var='intensity') %>% 
+      as.matrix(rownames='protein')
+    
+    if (!all(colnames(subMat) == fractions)){
+      message('Some fractions are missing. Adding missing fractions populated with NA...')
+      message('Missing fractions:\n', setdiff(fractions, colnames(subMat)))
+      subMat <- subMat[, match(fractions, colnames(subMat)), drop=FALSE] #missing fractions assigned an NA col. drop=FALSE to avoid collapsing to vector
+      colnames(subMat) <- fractions
+    }
+    return(subMat)
+  }
+  
+  .interpolateOutlierFractions <- function(subMat, sampleOI){
+    # interpolate intensity values in matrix rows
+    interpMat <- apply(subMat, 1, function(x) zoo::na.approx(x, na.rm=F, maxgap=maxGap)) %>% 
+      t()
+    # fractions to update; restrict to outlier and/or missing
+    fractionsOI <- c(qc.dt[sample == sampleOI & isOutlier == TRUE, unique(fraction)],
+                     setdiff(fractions, sec.dt[sample == sampleOI, unique(fraction)])
+                     )
+    
+    message('Handling problematic fractions for ', sampleOI, ': ', paste0(fractionsOI, collapse=','))
+    colsToupdate <- colnames(subMat) %in% fractionsOI
+    
+    # now apply the values from the interpolated matrix to the original
+    subMat[, colsToupdate] <- interpMat[, colsToupdate]
+    subdt <- setDT(reshape2::melt(subMat))
+    setnames(subdt, new=c('protein', 'fraction', 'intensity'))
+    
+    # add a flag to identify if the value is interpolated
+    subdt[, interpolated := FALSE]
+    subdt[fraction %in% fractionsOI, interpolated := TRUE]
+    return(subdt)
+  }
+
+  # handling missing/outlir fractions
+  sec.list <- pbapply::pblapply(split(sec.dt, sec.dt$sample), .addMissingFractions)
+  
+  # interpolate missing values
+  message('interpolating missing values...')
+  interp.list <- pbapply::pblapply(names(sec.list), function(n){.interpolateOutlierFractions(subMat = sec.list[[n]], sampleOI = n)}) 
+  names(interp.list) <- names(sec.list)
+  interp.dt <- rbindlist(interp.list, idcol='sample')
+  
+  interp.dt <- merge(x=interp.dt, y=sec.dt[, -c('intensity')], by=c('protein', 'sample', 'fraction'), all.x=T)
+  
+  # santy checks
+  #  nrows for non-missing fractions and intensity vals for non-interpolated should match between input and output
+  stopifnot( nrow(interp.dt[qc.dt, , on=.(sample, fraction)]) == nrow(sec.dt))
+  stopifnot( nrow(interp.dt[interpolated == FALSE & (intensity != ori.intensity), ]) == 0 )
+  return(interp.dt[, -c('ori.intensity')]) 
+}
+
+#' get pairwise distances between proteins in the corum database
+#' Option to use the given db to calculate distances or base distances on STRING network
+calculatePPIDistancesInNetwork <- function(corum.db.path=NULL, 
+                                           geneIDs=NULL,
+                                           useSTRINGdistances=F, 
+                                           string.links.path=NULL,
+                                           string.info.path=NULL,
+                                           stringCombinedScoreThreshold = 600
+                                           ){
+  
+  # load STRING as ppi dt
+  .loadSTRINGPPI<- function(string.links.path, string.info.path){
+    string.dt <- fread(string.links.path)[combined_score > stringCombinedScoreThreshold,]
+    string.anno <- fread(string.info.path)
+    # annotate with gene name
+    string.dt[string.anno, gene1 := i.preferred_name, on=c(protein1 = "#string_protein_id")]
+    string.dt[string.anno, gene2 := i.preferred_name, on=c(protein2 = "#string_protein_id")]
+    
+    string.dt <- string.dt[gene1 < gene2, .(gene1, gene2)]
+    return(string.dt)
+  }
+  
+  if (useSTRINGdistances && (is.null(string.links.path) |is.null(string.links.path))){
+    stop('No STRING database path/info provided. Exiting...')
+
+  } else if (useSTRINGdistances && (!is.null(string.links.path) && !is.null(string.links.path))){
+    
+    message('Calculating pairwise distances on STRING network...')
+    string.db <- .loadSTRINGPPI(string.links.path, string.info.path)
+    ppi.dt <- string.db
+  } else {
+    message('Calculating pairwise distances on CORUM network...')
+    ppi.dt <- corumPairs(corum.db.path)
+  }
+  
+  g <- igraph::graph_from_data_frame(ppi.dt, directed = F)
+  # all-vy-all shortest paths calculation
+  distMat <- igraph::distances(g)
+  distMat <- distMat[rownames(distMat) %in% geneIDs, colnames(distMat) %in% geneIDs]
+  dist.dt <- as.data.table(reshape2::melt(distMat)) %>% 
+    .[value != 0]
+  setnames(dist.dt, new=c('gene1', 'gene2', 'numberOfHops'))
+  cols.oi <- c('gene1', 'gene2')
+  dist.dt[, c(cols.oi) := lapply(.SD, as.character), .SDcols=cols.oi]
+  return(dist.dt[gene1 < gene2])
+}
+
+#' Generate both target and decoy complexes from a PPI datatable 
+#' Currently random sample proteins and checks all-by-all shortest paths meet distance threshold 
+#' Possibly faster/more robust graph-based methods? Discuss with BP...
+#' @param corum.db.path path to database (CORUM format)
+#' @param ppi_distances path to data.table of pairwise distances between proteins with cols c(protein1, protein2, nHops). protein lexicographically sorted (protein1 < protein2)
+#' @returns data.table of target and decoy (1:1 ratio) complexes in PPI format
+generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
+                                            ppi_distances=NULL,
+                                            decoy_min_distance=3,
+                                            quantile_threshold=0.1,
+                                            min_complex_size=2,
+                                            retries=3){
+  
+  # database ppi
+  corum.dt <- fread(corum.db.path)[, .(gene = unlist(strsplit(subunits_gene_name, ";"))), by=.(complex_id, complex_name)]
+  corum.dt[, complex_size := length(unique(gene)), by=complex_id]
+
+  corumInfo <- corum.dt[, .(complex_id, complex_size)] %>% 
+    .[complex_size >= min_complex_size,] %>% 
+      unique()
+  
+  # subset to distant proteins
+  ppi_distances <- ppi_distances[is.finite(nHops) & nHops >= decoy_min_distance] 
+  allGenes <- ppi_distances[, c(gene1, gene2)]
+
+  .makeDecoyComplex <- function(compID, featureIDs, ppi_distances=ppi_distances, retries=retries, decoy_min_distance, quantile_threshold){
+    
+    size <- corumInfo[complex_id == compID, complex_size]
+    tries <- 0
+    goodDecoySet <- FALSE 
+    
+    while (tries < retries & goodDecoySet == FALSE){
+      
+      genes <- sample(featureIDs, size, replace=F)
+      
+      # previously doing DT filtering but too slow..
+      # generate all possible pw combos and do a merge
+      gene_pairs <- t(combn(genes, 2))
+      pairs_dt <- data.table(gene1 = pmin(gene_pairs[,1], gene_pairs[,2]),
+                             gene2 = pmax(gene_pairs[,1], gene_pairs[,2]))
+      pairs_dt <- merge(pairs_dt, ppi_distances, by = c("gene1", "gene2"), all.x = TRUE)
+      min_hops <- quantile(pairs_dt$nHops, probs=quantile_threshold, na.rm=T) 
+    
+      # either min distance or no edges to keep genelist, or reset
+      if (min_hops >= decoy_min_distance | is.na(min_hops)){
+        goodDecoySet <- TRUE
+        break
+      } else {
+        tries <- tries + 1 
+        genes <- NULL # reset
+      }
+    }
+    if(is.null(genes)){
+      stop("Did not sample ", size, " genes passing ", decoy_min_distance, " distance threshold in ", retries, " retries.\nConsider increasing number of retries and/or reducing the distance threshold")
+    } else {
+      dt <- data.table(complex_id = paste0("decoy_", compID),
+                       complex_name = paste0("decoy_", compID),
+                       complex_size = size,
+                       gene = genes)
+      return(dt)
+    }
+  }
+  message('preparing decoy complexes...')
+  # pbmclappy to use multiple cores
+  cores <- parallel::detectCores() - 2
+  decoys.dt <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
+                                                                             featureIDs = allGenes, 
+                                                                             ppi_distances = ppi_distances,
+                                                                             retries = retries, 
+                                                                             decoy_min_distance = decoy_min_distance,
+                                                                             quantile_threshold = quantile_threshold
+                                                                             )}, mc.cores = cores) %>% 
+    rbindlist()
+  
+  comb.dt <- rbind(corum.dt, decoys.dt)
+  comb.dt[, decoy := FALSE]
+  comb.dt[grepl('decoy', complex_id), decoy := TRUE]
+  return(comb.dt)
+}
+
+
+## Complex Detection
+#' Subset to goodPeak set
+#' Do an all-by-all peak-correlation for all coeluting members per peak (currently taking peakCor)
+#' summarize peak correlation metrics (-log10Cor)... also maybe look at peak features?
+#' Compare the decoy complex scores vs the target complex scores to define an FDR threshold for 'good' Complexes.
+
+#' Use the peak detection table to filter out hypothesis/complexes to just those with min.members coeluting (goodPeaks)
+#' clusterPeaks; currently clustering peaks to account..
+#' cofmN_sd to assess spread around complex peak center
+#' not sure on other metrics..need to think on this but generate everything for now...
+detectComplexCoelutingPeaks <- function(comp_id, complex.dt, peakTable, maxDistance=2, min.members=2){
+  
+  peaks.dt <- copy(peakTable)
+  members <- complex.dt[complex_id == comp_id, unique(protein)]
+  
+  # subset to goodPeaks and cluster? I *think* it might make sense to grp proteins with peaks radius +/- 1
+  complex.info <- peaks.dt[protein %in% members & goodPeak] %>% 
+    .[, peakCluster := clusterPeaks(peakLocation,  maxDistance = maxDistance),]
+  
+  complex.info <- complex.info[,.(peakLocations = paste0(unique(peakLocation), collapse=';'),
+                                  complex_id = comp_id,
+                                  complex_name = complex.dt[complex_id == comp_id, unique(complex_name)],
+                                  members=paste0(members, collapse=";"),
+                                  nMembers = length(members),
+                                  CoelutingMembers=paste0(protein, collapse=";"),
+                                  nCoelutingMembers=.N,                                  peakHeight_mean = mean(peakHeight, na.rm=T),
+                                  peakHeight_sd = sd(peakHeight, na.rm=T),
+                                  cofmN_mean=mean(cofmN.standardized, na.rm=T),
+                                  cofmN_sd=sd(cofmN.standardized, na.rm=T), # this or standardised?
+                                  cv_mean=mean(cv, na.rm=T), # not sure on these
+                                  cv_sd=sd(cv, na.rm=T),
+                                  var_man=mean(var, na.rm=T),
+                                  var_sd = sd(var, na.rm=T))
+                                  , by=peakCluster]
+  
+  return(complex.info[nCoelutingMembers >= min.members])
+}
+
+summarizeCoelutingComplexes <- function(comp_id, complexes.toScore.dt, cor.dt){
+  
+  # cp & tidy peakCor 
+  peakCor.dt <- copy(cor.dt)
+  print(peakCor.dt)
+  
+  char.vec <- c('protein1', 'protein2')
+  cor.dt[, c(char.vec) := lapply(.SD, as.character), .SDcols=char.vec]
+  cor.dt <- cor.dt[protein1 < protein2,]
+  setkeyv(cor.dt, c('protein1', 'protein2'))
+
+  members <- complexes.toScore.dt[complex_id == comp_id, unique(unlist(strsplit(CoelutingMembers, '[;]')))]
+  colsToKeep <- setdiff(colnames(complexes.toScore.dt), 'peakLocations')
+
+  complexes.toScore.dt[, c("peakStart", "peakEnd") := { peaks <- as.numeric(unlist(strsplit(peakLocations, ";"))); list(min(peaks), max(peaks)) }, by = .(complex_id, peakCluster)]
+  
+  # prepare a dt for merging; need to also merge by peakLocation to ensure we are only scoring co-eluting peaks
+  prot.pairs <- t(combn(members, 2))
+  comp.pairs <- data.table(complex_id = as.character(comp_id),
+                           protein1 = pmin(prot.pairs[,1], prot.pairs[,2]),
+                           protein2 = pmax(prot.pairs[,1], prot.pairs[,2]))
+  setkeyv(comp.pairs, c('protein1', 'protein2'))
+  
+  # inner join faster subset than logical filtering 
+
+  complex.cor.dt <- cor.dt[comp.pairs, on=.(protein1, protein2)]
+  print(complex.cor.dt)
+  #message("subsetting to complex coelutions detected")
+  
+  # subset to best correlated peaks per PPI, and summarize corScore
+  complex.cor.dt <- complex.cor.dt[, .SD[which.max(corScore)], by=.(protein1, protein2, prot1Peak, prot2Peak)]
+  
+  # join all, then filter based on peak range
+  merge.complex.cor.dt <- merge(y=complex.cor.dt, x=complexes.toScore.dt[complex_id == comp_id], by="complex_id", allow.cartesian = TRUE)
+  merge.complex.cor.dt <- merge.complex.cor.dt[prot1Peak >= peakStart & prot1Peak <= peakEnd &prot2Peak >= peakStart & prot2Peak <= peakEnd]
+
+  # now we want to summarize scores per cluster. Sum scores per peak per Cluster, then select the best score
+  # can decide how to summarize across peak; I think for now we might actually want to keep all complex peaks for potential differential testing?
+  merge.complex.cor.dt <- merge.complex.cor.dt[, .(members, 
+                                                   nMembers,
+                                                   CoelutingMembers, 
+                                                   completeness = nCoelutingMembers/nMembers,
+                                                   corScore_sum = sum(corScore, na.rm=T),
+                                                   corScore_mean = mean(corScore, na.rm=T),
+                                                   corScore_sd = sd(corScore, na.rm=T),
+                                                   corScore_min = min(corScore, na.rm=T),
+                                                   corScore_max = max(corScore, na.rm=T),
+                                                   decoy
+                                                   ),by=.(complex_id, complex_name, decoy, peakCluster)] %>% 
+    unique()
+  
+  return(merge.complex.cor.dt)
+}
+
+## TODO
+#filter complexes by expected elution mass (are all members of the complex eluting at heavier than monomeric?)
+#heatmaps, elution plot funcitons
+# ppi-scoring include structural ppi score prior 
+
+
+# correlation heatmap see  https://jokergoo.github.io/ComplexHeatmap-reference/book/a-single-heatmap.html#customize-the-heatmap-body
+plotSampleCorrelationHeatmap <- function(cor.mat,...){
+  #enforce same row and column ordering
+  od =  hclust(dist(cor.mat))$order
+  cm = cor.mat[od, od]
+
+  hm <- Heatmap(cm,
+                name='Sample Pearson Corr.',
+                rect_gp = gpar(type = "none"), 
+                cluster_rows = F, 
+                cluster_columns = F,
+                column_names_gp = gpar(fontsize=8),
+                row_names_gp = gpar(fontsize=8),
+	              cell_fun = function(j, i, x, y, w, h, fill) {
+		            if(i >= j) {
+		              grid.rect(x, y, w, h, gp = gpar(fill = fill, col = fill))
+		              grid.text(sprintf("%.2f", cm[i, j]), x, y, gp = gpar(fontsize = 6, col='white'))
+		              }
+	             },
+		            ...)
+  return(draw(hm))
+}
+
+
+## CCprofiler-related utility functions. Format sec.long tables for use with the CCprofiler tool
+prepareTracesProteinAnnotation <- function(uniprot_path='~/Documents/utils/mg_utils/data/uniprotkb_reviewed_true_2025_05_13.tsv.gz'){
+  
+  if (file.exists(uniprot_path)){
+    uniprot.txt <- fread(uniprot_path)
+  }
+  # tidy col names 
+  uniprot.txt <- uniprot.txt[Organism == 'Homo sapiens (Human)', .(id=Entry, protein_id=Entry, Entry_name=`Entry Name`, 
+                                                                   Status='reviewed', Protein_names=`Protein names`,  
+                                                                   Gene_names=`Gene Names`, Organism, Length, Mass, GO_ID=`Gene Ontology IDs`, protein_mw=(Mass/1000), Decoy=0)]
+  return(uniprot.txt)
+}
+#examlpe
+#prepareTracesProteinAnnotation('~/Documents/utils/mg_utils/data/uniprotkb_reviewed_true_2025_05_13.tsv.gz')
+
+prepareTracesIntensity <- function(sec.dt, splitCol='sample', intsCol='intensity', useInterpolated=FALSE){
+  
+  dt <- copy(sec.dt)
+  
+  if (useInterpolated == FALSE){
+    dt[interpolated == TRUE, eval(intsCol) := NA]
+  } else {
+    message('Warning: including interpolated values.\nIf you wish to disable, use the `useInterpolated=FALSE`')
+  }
+  
+  ints.dt <- dcast(dt, protein~fraction, value.var = eval(intsCol))
+  # convert NA to 0
+  ints.long <- setDT(reshape2::melt(ints.dt, id.vars='protein'))
+  ints.long[is.na(value), value := 0]
+  
+  ints.dt <- dcast(ints.long, protein~variable, value.vars='value')
+  ints.dt[, id := protein]
+  ints.dt[, protein := NULL]
+  
+  # check fraction ordering
+  if(all(colnames(ints.dt) == c(seq(1, max(dt$fraction),1), 'id')) != TRUE)
+    stop('Missing fractions in input datatable...\nPlease handle these missing fractions before running.\nExiting...')
+  
+  return(ints.dt)
+}
+# example
+#ints.dt <- prepareTracesIntensity(sec.dt = sec.long[sample=='Infected_3',], useInterpolated = FALSE)
+
+
+prepareTracesFractionAnnotation <-  function(sec.long, mw_path='/Users/martingordon/Documents/projects/061425_MMuralidharan_HIVdonor23_SECMS/data/HIV_Infection_CD4T_cells/SEC_Profiles/D1-D3-cal_SRT.txt'){
+  
+  dt <- copy(sec.long)
+  
+  if (file.exists(mw_path)){
+    mw <- fread(mw_path)
+    print(mw)
+  }
+  setnames(mw, new=c('fraction', 'mw'))
+  
+  mc <- calculateFractionMassConverters(mw)
+  mw.dt <- sec.long[, .(filename=paste0(sample,'.fraction',fraction), id=fraction, molecular_weight=mc$fraction2Mass(fraction))] %>% 
+    unique()
+  return(mw.dt)
+}
+# example
+#mw.traces <- prepareTracesFractionAnnotation(sec.long = sec.long[sample=='Infected_3'])
+
+#' Note; CCprofiler throws an nambioguous error if protein order in ints mat (traces) and annotation dt do not match.
+#' Subset intesnity matrix to overlapping proteins. Warns rather than fails if overlaps do not match
+enforceTraceAndAnnotationRowOrder <- function(traces.obj){
+
+  mat  <- traces.obj$traces
+  anno <- traces.obj$trace_annotation
+  
+  # subset the mat to the set of proteins in the anno.dt
+  prot.overlaps <- intersect(mat$id, anno$protein_id)
+  submat <- mat[id %in% prot.overlaps,]
+  message(nrow(submat),  ' out of ', nrow(mat), ' rows match betweem the protein annotation and traces file\nSubsetting to the overlapping proteins')
+  
+  anno <- anno[id %in% prot.overlaps]
+  #match the row ordering between anno and ints
+  traces.obj$traces <- submat[match(anno$id, submat$id)]
+  traces.obj$trace_annotation <- anno
+  return(traces.obj)
+}
+
+traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)
