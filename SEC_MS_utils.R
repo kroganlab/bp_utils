@@ -695,14 +695,9 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 # scaling ----
 
 
-<<<<<<< HEAD
 
 
 scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = FALSE){
-
-=======
-scaleByTotalIntensity <- function(secLong.dt){
->>>>>>> 06bb6887381ce678ee7ba5470909deef73729bc1
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
   
   
