@@ -9,7 +9,8 @@ rotate.x.axis.text <- theme(axis.text.x = element_text(angle = 90,vjust = 0.5, h
 #' 
 
 summarizeSECTable <- function(secLong.dt){
-  secLong.dt[, .(numFractions = length(unique(fraction)), minFraction = min(fraction), maxFraction = max(fraction), nrow = .N), by = .(treatment, replicate)]
+  secLong.dt[, .(numFractions = length(unique(fraction)), minFraction = min(fraction), maxFraction = max(fraction), nrow = .N,
+                 missingFractions = paste0(setdiff(min(fraction):max(fraction), unique(fraction)), collapse = ";")), by = .(treatment, replicate)]
 }
 
 
@@ -696,8 +697,17 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 
 
 
-scaleByTotalIntensity <- function(secLong.dt){
+scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = FALSE){
+
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
+  
+  
+  if (preserveSampleRelativeIntensity){
+    scaleFactors <- secLong.dt[, .(sumInt = sum(intensity, na.rm = TRUE)), by = .(sample, protein)]
+    scaleFactors[, scaleFactor := sumInt/max(sumInt), by = .(protein)]
+    secLong.dt[scaleFactors, intensity_totalScaled := intensity_totalScaled * i.scaleFactor, on = .(sample, protein)]
+  }
+  return (secLong.dt)
 }
 
 
@@ -1782,7 +1792,10 @@ matchTwoPeakTables <- function (peaks.dt, i.peaks.dt, matchColumn  = "peakLocati
 #'                   The default, 0.75, means bottom 12.5% and  top 12.5% of values are ignored as they are likely full of outliers. 
 standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt, sampleName, minPeaksPerFraction = 50,
                                                firstPeak = 1, lastPeak = 72,
-                                               doPlots = TRUE, fitPortion = 0.75, startFitAtPeak = 15){
+                                               doPlots = TRUE, fitPortion = 0.75, startFitAtPeak = 15,
+                                               trimFitAt = NULL){
+  if(is.null(trimFitAt))trimFitAt <- startFitAtPeak
+  
   message ("Matching peaks between samples...")
   matchedPeaks <- matchTwoPeakTables (otherPeaks, i.peaks.dt = standardPeaks)
   matchedPeaks <- matchedPeaks[cofmN >= startFitAtPeak & i.cofmN >= startFitAtPeak]
@@ -1824,7 +1837,8 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
                        span = 0.25)
   
   message ("Adding/updating column cofmN.standardized with standardized peak cofmN")
-  otherPeaks[, cofmN.standardized := predict (loess.model, cofmN)]
+  otherPeaks[cofmN >= trimFitAt, cofmN.standardized := predict (loess.model, cofmN)]
+  #otherPeaks[, cofmN.standardized := predict (loess.model, cofmN)]
   
   
   # interpolate the lower tail
@@ -1842,7 +1856,8 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
   otherPeaks[cofmN > max(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
 
   message ("Updating sec.dt with standardFraction for sample ", sampleName)
-  sec.dt[ sample == sampleName, standardFraction := predict (loess.model, fraction)]
+  sec.dt[ sample == sampleName & fraction >= trimFitAt, standardFraction := predict (loess.model, fraction)]
+  #sec.dt[ sample == sampleName , standardFraction := predict (loess.model, fraction)]
   sec.dt[fraction < min(otherRange) & sample == sampleName, standardFraction := .linearInterpolateY(fraction, xRange = c(firstPeak, min(otherRange)), y = c(firstPeak, min(standardRange)))]
   sec.dt[fraction > max(otherRange) & sample == sampleName, standardFraction := .linearInterpolateY(fraction, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
     
