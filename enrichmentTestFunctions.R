@@ -897,3 +897,115 @@ enrichmentAnnotationHeatmap <- function(enrich.dt = data.table (group = c(), pva
           ...)
 }
 
+
+#' @param genesOrTable either a vector genes, or a data.frame (table etc) with genes in one column and possibly groups defined by other columns
+#' 
+
+
+fastEnrich <- function (genesOrTable, gmt, minMatchSize= 3, universe = NULL, groupColumns = NULL, geneColumn = "gene", maxSetSize = 10000){
+  
+  # setup data.table of gene groups in input
+  if ("character" %in% class(genesOrTable)){
+    cluster.dt <- data.table(gene = genesOrTable, group = "input")
+  } else if ("data.frame" %in% class(genesOrTable)){
+    clusters <- do.call(paste, c(lapply(groupColumns, function(col)genesOrTable[[col]]), list(sep = "_")))
+    cluster.dt <- data.table(gene = genesOrTable[[geneColumn]], group = clusters)
+  } else {stop("Unexpected input type. Need character vector or data(frame/table/tibble)")}
+
+  
+  # define universe
+  if (is.null(universe)){
+    if(length(unique(cluster.dt$group)) == 1){
+      message ("Using gmt as universe. Probably ill-advised")
+      universe <- unique(gmt$gene)
+    } else{
+      message ("Universe set to only genes in input")
+      universe <-  unique(cluster.dt$gene) 
+    }
+  }
+  # shrink universe to just those in the gmt
+  universe <- intersect (universe, gmt$gene)
+  
+  # shrink genes input to just those in universe
+  cluster.dt <- cluster.dt[gene %in% universe]
+  # shrink gmt to just those in universe
+  gmt <- gmt[gene %in% universe]
+
+  # size of gene sets
+  bgCount <- gmt[ , .(setSize = .N), by = ont]
+  # exclude those gene sets that are too large, an efficiency step here
+  gmt <- gmt[bgCount[setSize <= maxSetSize], , on = "ont"]
+
+  # gene set overlap with group
+  inGroupCount <- cluster.dt[gmt[gene %in% cluster.dt$gene],
+                                .(group, gene, ont),
+                                on = c(gene = "gene"),
+                                allow.cartesian = TRUE
+                                ][, .(groupANDsetSize = .N,
+                                      genes = paste0(gene, collapse = "/")),
+                                 by = .(group, ont)]
+
+  # group size
+  groupDenom <- cluster.dt[, .(groupSize = .N), by= group]
+  
+  # colllect necessary stats in a single data.table
+  contingencyStats <- inGroupCount[groupDenom, , on = "group"][bgCount, , on = "ont"]
+  contingencyStats[, universeSize := length(universe)]
+  
+  # black and white balls in urn language for phyper. 
+  contingencyStats[, whiteBallsDrawn := groupANDsetSize]
+  contingencyStats[, totalWhiteInUrn := setSize]
+  contingencyStats[, totalBlackInUrn := universeSize - setSize]
+  contingencyStats[, totalBallsDrawn := groupSize]
+  
+  contingencyStats[ , log10P := phyper(whiteBallsDrawn-1, totalWhiteInUrn, totalBlackInUrn, totalBallsDrawn, lower.tail = FALSE, log.p = TRUE)/log(10)]
+  
+  # for odds ratio:
+  contingencyStats[, TT := groupANDsetSize]
+  contingencyStats[, TF := groupSize - groupANDsetSize]
+  contingencyStats[, FT := setSize - groupANDsetSize]
+  contingencyStats[, FF := universeSize - FT - TF - TT]
+  contingencyStats[, oddsRatio := TT * FF/(TF * FT)]
+  
+  
+  return(contingencyStats[groupANDsetSize>=minMatchSize, .(group, set = ont, groupANDsetSize, groupSize, setSize, universeSize, oddsRatio, log10P, genes)][order (log10P)])
+
+}
+
+# fastEnrichClusterTable <- function (cluster.dt, gmt, minMatchSize = 3){
+#   mutualProteins <- intersect(cluster.dt$protein, unique(gmt$gene))
+#   
+#   # size of gene sets
+#   bgCount <- gmt[gene %in% mutualProteins, .(setSize = .N), by = ont]
+#   
+#   # gene set overlap with group
+#   inGroupCount <- cluster.dt[gmt, , on = c(protein = "gene")][!is.na(cluster)][, .(groupANDsetSize = .N, proteins = paste0(protein, collapse = "/")), by = .(cluster, ont)]
+#   
+#   # group size
+#   groupDenom <- cluster.dt[protein %in% mutualProteins, .(groupSize = .N), by= cluster]
+#   
+#   contingencyStats <- inGroupCount[groupDenom, , on = "cluster"][bgCount, , on = "ont"]
+#   contingencyStats[, universeSize := length(mutualProteins)]
+#   
+#   # black and white balls in urn language. 
+#   contingencyStats[, whiteBallsDrawn := groupANDsetSize]
+#   contingencyStats[, totalWhiteInUrn := setSize]
+#   contingencyStats[, totalBlackInUrn := universeSize - setSize]
+#   contingencyStats[, totalBallsDrawn := groupSize]
+#   
+#   contingencyStats[ , log10P := phyper(whiteBallsDrawn-1, totalWhiteInUrn, totalBlackInUrn, totalBallsDrawn, lower.tail = FALSE, log.p = TRUE)/log(10)]
+#   
+#   contingencyStats[, TT := groupANDsetSize]
+#   contingencyStats[, TF := groupSize - groupANDsetSize]
+#   contingencyStats[, FT := setSize - groupANDsetSize]
+#   contingencyStats[, FF := universeSize - FT - TF - TT]
+#   contingencyStats[, oddsRatio := TT * FF/(TF * FT)]
+#   
+#   
+#   return(contingencyStats[groupANDsetSize>=minMatchSize, .(cluster, ont, groupANDsetSize, groupSize, setSize, universeSize, oddsRatio, log10P, proteins)])
+# }
+# 
+# 
+
+
+
