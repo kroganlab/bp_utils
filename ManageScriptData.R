@@ -75,9 +75,9 @@ GetLatestScriptFile <- function(x, scriptName=NULL, include.dirs = FALSE){
 #' File names are guaranteed unique because they include date:time to the second
 #' and when there is a clash a further counter suffix is added
 #' @param prefix optional string to label pdf names
-#' @subDir prefix an optional subdirectory name. Useful when a loop generates numerous related pdfs at a time
-PDFBackupFileName <- function(prefix = "", subDir = "", suffix = "pdf"){
-  scriptDir <- ScriptNamedDir()
+#' @param subDir  an optional subdirectory name. Useful when a loop generates numerous related pdfs at a time
+PDFBackupFileName <- function(prefix = "", subDir = "", suffix = "pdf", scriptName = NULL){
+  scriptDir <- ScriptNamedDir(scriptName)
   imageDir <- file.path(scriptDir, "pdfs", subDir)
   if (!dir.exists(imageDir)) dir.create(imageDir, recursive = TRUE)
   now <- format(Sys.time(),  "%Y_%m_%d__%H_%M__%S")
