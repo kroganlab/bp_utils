@@ -521,7 +521,8 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 }
 
 
-translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE, fillMissing = FALSE, isoformAware = FALSE){
+translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE,
+                                      fillMissing = FALSE, isoformAware = FALSE,tryUniprotWeb = FALSE ){
   if (isoformAware == TRUE){
     isoforms <- data.table(isoforms = uniprots)
     isoforms[, uniprots := gsub ("-[0-9]+$", "", isoforms)]
@@ -529,7 +530,8 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
     uniprots <- isoforms$uniprots
   }
   genes <- translateUniprot2Something(uniprots, something = "SYMBOL", 
-                             species = species, useDatFile = useDatFile, fillMissing = fillMissing)
+                             species = species, useDatFile = useDatFile,
+                             fillMissing = fillMissing, tryUniprotWeb)
   
   if (isoformAware == TRUE){
     isoforms[, genes := genes]
@@ -539,7 +541,8 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
   return (genes)
 }
 
-translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", fillMissing = FALSE, useDatFile = FALSE) {
+translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", 
+                                        fillMissing = FALSE, useDatFile = FALSE, tryUniprotWeb = FALSE) {
   
   if (useDatFile != FALSE){
     if (something != "SYMBOL"){
@@ -584,6 +587,17 @@ translateUniprot2Something <- function (uniprots, something = "SYMBOL", species 
   setkey(mapTable, "uniprot")
   # this orders all and expands the missing cases
   mapTable <- mapTable[uniprots]
+  
+  if(tryUniprotWeb == TRUE){
+    missing <- mapTable[is.na(gene), unique(uniprot)]
+    notMissing <- mapTable[!is.na(gene), unique(uniprot)]
+    message (length(notMissing)," uniprot entries found locally. \n Loading ", length(missing), " uniprot entries over the web.")
+    web.info <- uniprotInfoFromWeb(missing)
+    
+    mapTable[web.info, gene := Gene.Names..primary., on =c(uniprot = "Entry")]
+  }
+  
+  
   if(fillMissing == TRUE){
     # where gene lookup failed, assign the original uniprot
     mapTable[is.na(gene), gene := uniprot]
@@ -592,7 +606,9 @@ translateUniprot2Something <- function (uniprots, something = "SYMBOL", species 
 }
 
 # do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
-translateSomething2SomethingElse <- function (somethings, originalType = "UNIPROT",  somethingElse = "SYMBOL", species = "HUMAN", fillMissing = FALSE ) {
+translateSomething2SomethingElse <- function (somethings, originalType = "UNIPROT", 
+                                              somethingElse = "SYMBOL", species = "HUMAN",
+                                              fillMissing = FALSE, tryUniprotWeb = FALSE) {
   allowedColumns <- AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db)
   
   if (!all(c(originalType, somethingElse)%in% allowedColumns) ){
@@ -629,6 +645,16 @@ translateSomething2SomethingElse <- function (somethings, originalType = "UNIPRO
   setkey(mapTable, something)
   # this orders all and expands the missing cases
   mapTable <- mapTable[as.character(somethings)]
+  
+  if(tryUniprotWeb == TRUE){
+    stopifnot (originalType == "UNIPROT")
+    missing <- mapTable[is.na(gene), something]
+    web.info <- uniprotInfoFromWeb(missing)
+    
+    mapTable[web.info, gene := Gene.Names..primary., on =c(something = "Entry")]
+  }
+  
+  
   if(fillMissing == TRUE){
     # where gene lookup failed, assign the original uniprot
     mapTable[is.na(gene), gene := something]
@@ -666,13 +692,18 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
 
 
 
-multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE, isoformAware = FALSE){
+multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN",
+                                      simplify = FALSE, useDatFile = FALSE,
+                                      allowDups = FALSE, isoformAware = FALSE,
+                                      replaceNA = TRUE, tryUniprotWeb = FALSE){
   toGenes <- data.table(uniprots = as.character(unique(uniprots)))
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
-  toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile, isoformAware = isoformAware)]
-  toGenes[is.na(singleGene), singleGene := singleUniprot]
+  toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile,
+                                                   isoformAware = isoformAware, tryUniprotWeb = tryUniprotWeb)]
+  if (replaceNA)
+    toGenes[is.na(singleGene), singleGene := singleUniprot]
   if (simplify == TRUE){
-    simplify = function(x)unique(sort(x))
+    simplify = function(x)unique(sort(x[!is.na(x) & x != ""]))
   }else if (simplify == FALSE){
     simplify = identity # do nothing
   }else if (! "function" %in% class (simplify)){
