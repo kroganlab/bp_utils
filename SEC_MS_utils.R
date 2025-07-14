@@ -273,7 +273,7 @@ qcFractionCorrelationLinePlot <- function(fullCor.long,
     theme(strip.text = element_text(color = facetTextColor))
   
   if (splitByReplicate){
-    p <- p + facet_grid(ref.treatment~ref.replicate)
+    p <- p + facet_grid(ref.replicate~ref.replicate)
   }  else{
     p <- p + facet_grid(ref.treatment~.)
   }
@@ -2404,10 +2404,15 @@ summarizeCoelutingComplexes <- function(comp_id, complexes.toScore.dt, cor.dt){
 
 
 # correlation heatmap see  https://jokergoo.github.io/ComplexHeatmap-reference/book/a-single-heatmap.html#customize-the-heatmap-body
-plotSampleCorrelationHeatmap <- function(cor.mat,...){
-  #enforce same row and column ordering
-  od =  hclust(dist(cor.mat))$order
-  cm = cor.mat[od, od]
+plotSampleCorrelationHeatmap <- function(cor.mat, row_order=NULL, ...){
+  
+  # if not provided, cluster to get row order
+  if (is.null(row_order)) {
+    row_order <- hclust(dist(cor.mat))$order
+  }
+  
+  # Apply ordering
+  cm <- cor.mat[row_order, row_order, drop = FALSE]
 
   hm <- Heatmap(cm,
                 name='Sample Pearson Corr.',
@@ -2423,7 +2428,7 @@ plotSampleCorrelationHeatmap <- function(cor.mat,...){
 		              }
 	             },
 		            ...)
-  return(draw(hm))
+  return(hm)
 }
 
 
@@ -2491,21 +2496,28 @@ prepareTracesFractionAnnotation <-  function(sec.long, mw_path='/Users/martingor
 
 #' Note; CCprofiler throws an nambioguous error if protein order in ints mat (traces) and annotation dt do not match.
 #' Subset intesnity matrix to overlapping proteins. Warns rather than fails if overlaps do not match
-enforceTraceAndAnnotationRowOrder <- function(traces.obj){
+enforceTraceAndAnnotationRowOrder <- function(traces_obj){
 
-  mat  <- traces.obj$traces
-  anno <- traces.obj$trace_annotation
+  mat  <- traces_obj$traces
+  anno <- traces_obj$trace_annotation
   
+ 
   # subset the mat to the set of proteins in the anno.dt
   prot.overlaps <- intersect(mat$id, anno$protein_id)
   submat <- mat[id %in% prot.overlaps,]
   message(nrow(submat),  ' out of ', nrow(mat), ' rows match betweem the protein annotation and traces file\nSubsetting to the overlapping proteins')
   
   anno <- anno[id %in% prot.overlaps]
-  #match the row ordering between anno and ints
-  traces.obj$traces <- submat[match(anno$id, submat$id)]
-  traces.obj$trace_annotation <- anno
-  return(traces.obj)
+
+  new.traces.obj <- list(traces=submat[match(anno$id, submat$id)],
+                         trace_type=trace.type,
+                         trace_annotation=anno,
+                         fraction_annotation=f.anno.dt
+                     )
+
+
+class(new.traces.obj) <- 'traces'
+return(new.traces.obj)
 }
 
 traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)

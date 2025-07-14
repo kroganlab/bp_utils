@@ -31,7 +31,7 @@ ScriptNamedDir <- function(scriptName = NULL){
     scriptName <- rstudioapi::getActiveDocumentContext()$path
   if (is.null (scriptName) || scriptName == "")
     stop("No script name found -- you may need to save this file first")
-  outDir <- gsub(".R(md)?$", "_data", scriptName, ignore.case = TRUE)
+  outDir <- gsub(".[qR](md)?$", "_data", scriptName, ignore.case = TRUE)
   stopifnot( outDir != scriptName)
   if (!dir.exists(outDir)){
     message ("Creating directory associated with ", scriptName,", at ", outDir)
