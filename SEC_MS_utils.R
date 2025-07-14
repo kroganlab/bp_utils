@@ -2520,4 +2520,4 @@ class(new.traces.obj) <- 'traces'
 return(new.traces.obj)
 }
 
-traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)
+#traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)
