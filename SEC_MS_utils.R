@@ -722,21 +722,27 @@ scaleByMaxIntensity_global <- function(secLong.dt){
 
 #' @param scaleDenom total/max. What to use for the denominator for scaled intensity, total=sum(intensity) or max(intensity)
 
-scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE, useInterpolated=FALSE){
+scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE, useInterpolated=FALSE,
+                                    preserveSampleRelativeIntensity = FALSE){
 
   sec.dt <- copy(secLong.dt)
 
   # reset to ensure intended ints vals (interpolated/no interpolation) used 
-  sec.dt[, c('intensity_maxScaled', 'intensity_totalScaled') := NULL]
+  columns2nullOut <- intersect (c('intensity_maxScaled', 'intensity_totalScaled'), colnames(sec.dt))
+  if (length(columns2nullOut) > 0){
+    message ("Deleting columns before recomputing new scaled_intensity:", paste0(columns2nullOut, collapse = "; "))
+    sec.dt[, columns2nullOut := NULL, with = FALSE]
+  }
 
   if(useInterpolated){
     message("Warning: Including interpolated values for missing & outlier fractions\nYou may want to remove these values from differential analysis by setting useInterpolated=FALSE")
   } else {
-    sec.dt[interpolated == TRUE, intensity := NA]
+    if ("interpolated" %in% colnames(sec.dt))
+        sec.dt[interpolated == TRUE, intensity := NA]
   }
 
   if(scaleDenom == "total" & !"intensity_totalScaled" %in% colnames(sec.dt))
-    scaleByTotalIntensity(sec.dt)
+    scaleByTotalIntensity(sec.dt, preserveSampleRelativeIntensity)
   if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(sec.dt))
     scaleByMaxIntensity(sec.dt)
 
