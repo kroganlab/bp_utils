@@ -2228,17 +2228,20 @@ calculatePPIDistancesInNetwork <- function(corum.db.path=NULL,
 #' Currently random sample proteins and checks all-by-all shortest paths meet distance threshold 
 #' Possibly faster/more robust graph-based methods? Discuss with BP...
 #' @param corum.db.path path to database (CORUM format)
-#' @param ppi_distances path to data.table of pairwise distances between proteins with cols c(protein1, protein2, nHops). protein lexicographically sorted (protein1 < protein2)
+#' @param ppi_distances path to data.table of pairwise distances between proteins with cols c(protein1, protein2, numberOfHops). protein lexicographically sorted (protein1 < protein2)
 #' @returns data.table of target and decoy (1:1 ratio) complexes in PPI format
 generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
                                             ppi_distances=NULL,
                                             decoy_min_distance=3,
+                                            decoyRatio=1, # 1:1 decoy to truth ratio
                                             quantile_threshold=0.1,
                                             min_complex_size=2,
-                                            retries=3){
+                                            retries=3,
+                                            nCores=1){
   
   # database ppi
-  corum.dt <- fread(corum.db.path)[, .(gene = unlist(strsplit(subunits_gene_name, ";"))), by=.(complex_id, complex_name)]
+  corum.dt <- fread(corum.db.path)[, .(gene = unlist(strsplit(subunits_gene_name, ";")),
+                                       protein = unlist(strsplit(subunits_uniprot_id, ";"))), by=.(complex_id, complex_name)]
   corum.dt[, complex_size := length(unique(gene)), by=complex_id]
 
   corumInfo <- corum.dt[, .(complex_id, complex_size)] %>% 
@@ -2246,7 +2249,7 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
       unique()
   
   # subset to distant proteins
-  ppi_distances <- ppi_distances[is.finite(nHops) & nHops >= decoy_min_distance] 
+  ppi_distances <- ppi_distances[is.finite(numberOfHops) & numberOfHops >= decoy_min_distance] 
   allGenes <- ppi_distances[, c(gene1, gene2)]
 
   .makeDecoyComplex <- function(compID, featureIDs, ppi_distances=ppi_distances, retries=retries, decoy_min_distance, quantile_threshold){
@@ -2265,7 +2268,7 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
       pairs_dt <- data.table(gene1 = pmin(gene_pairs[,1], gene_pairs[,2]),
                              gene2 = pmax(gene_pairs[,1], gene_pairs[,2]))
       pairs_dt <- merge(pairs_dt, ppi_distances, by = c("gene1", "gene2"), all.x = TRUE)
-      min_hops <- quantile(pairs_dt$nHops, probs=quantile_threshold, na.rm=T) 
+      min_hops <- quantile(pairs_dt$numberOfHops, probs=quantile_threshold, na.rm=T) 
     
       # either min distance or no edges to keep genelist, or reset
       if (min_hops >= decoy_min_distance | is.na(min_hops)){
@@ -2288,19 +2291,43 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
   }
   message('preparing decoy complexes...')
   # pbmclappy to use multiple cores
-  cores <- parallel::detectCores() - 2
-  decoys.dt <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
-                                                                             featureIDs = allGenes, 
-                                                                             ppi_distances = ppi_distances,
-                                                                             retries = retries, 
-                                                                             decoy_min_distance = decoy_min_distance,
-                                                                             quantile_threshold = quantile_threshold
-                                                                             )}, mc.cores = cores) %>% 
-    rbindlist()
-  
-  comb.dt <- rbind(corum.dt, decoys.dt)
+  if (nCores > (parallel::detectCores() - 2)){
+    cores <- parallel::detectCores() - 2
+    message('Warning; requested more cores than available on system\nAllocating ', cores)
+  } else {
+    cores <- ncores
+  }
+  if (decoyRatio > 1){
+    message('Generating decoy sets', decoyRatio, ' times the truth set size')
+    
+    decoys.dt <- lapply(seq(1, decoyRatio, 1), function(setN){
+      message('Creating set ', setN, ' ....')
+      decoys.set <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
+                                                                                                     featureIDs = allGenes, 
+                                                                                                     ppi_distances = ppi_distances,
+                                                                                                     retries = retries, 
+                                                                                                     decoy_min_distance = decoy_min_distance,
+                                                                                                     quantile_threshold = quantile_threshold
+      )}, mc.cores = cores) %>% 
+        rbindlist()
+    }) %>% 
+      rbindlist()
+  } else {
+    
+    decoys.dt <- pbmcapply::pbmclapply(corumInfo[, complex_id],  function(comp){ .makeDecoyComplex(compID = comp, 
+                                                                                                   featureIDs = allGenes, 
+                                                                                                   ppi_distances = ppi_distances,
+                                                                                                   retries = retries, 
+                                                                                                   decoy_min_distance = decoy_min_distance,
+                                                                                                   quantile_threshold = quantile_threshold
+                                                                                                   )}, mc.cores = cores) %>% 
+      rbindlist()
+  }
+  # combine results 
+  comb.dt <- rbind(corum.dt, decoys.dt, fill=T)
   comb.dt[, decoy := FALSE]
   comb.dt[grepl('decoy', complex_id), decoy := TRUE]
+  comb.dt[corum.dt, protein := i.protein, on='gene']
   return(comb.dt)
 }
 
@@ -2315,33 +2342,52 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
 #' clusterPeaks; currently clustering peaks to account..
 #' cofmN_sd to assess spread around complex peak center
 #' not sure on other metrics..need to think on this but generate everything for now...
-detectComplexCoelutingPeaks <- function(comp_id, complex.dt, peakTable, maxDistance=2, min.members=2){
-  
+detectComplexCoelutingMembers <- function(comp_id, 
+                                          complex.dt, 
+                                          peakTable, 
+                                          mw.dt=proteinExpMW, 
+                                          maxDistance=2, 
+                                          min.members=2, 
+                                          complexElutionThreshold=1.5,
+                                          completenessThreshold=.5,
+                                          plot=T){
   peaks.dt <- copy(peakTable)
+  peaks.dt[mw.dt, mw := i.mw, on='protein']
   members <- complex.dt[complex_id == comp_id, unique(protein)]
   
-  # subset to goodPeaks and cluster? I *think* it might make sense to grp proteins with peaks radius +/- 1
-  complex.info <- peaks.dt[protein %in% members & goodPeak] %>% 
-    .[, peakCluster := clusterPeaks(peakLocation,  maxDistance = maxDistance),]
+  
+  # grp proteins with peaks radius +/- 1
+  complex.info <- peaks.dt[protein %in% members & goodPeak == TRUE]
+  complex.info[, complexPeakCluster := clusterPeaks(peakLocation,  maxDistance = maxDistance),]
+  
+  #complex.info[, detectedElution := mc$fraction2Mass(peakLocation)]
+  #complex.info[detectedElution >= (complexElutionThreshold * mc$mass2Fraction(mw)), goodPeak := FALSE]
+  
+  # to label this a good complex peak; we want; all good peaks, > .5 complex completeness & peaks to occur > monomer weight 
+  message('Removing complex peaks with an elution mass fraction < ', complexElutionThreshold, ' expected complex monomeric mass')
+  complex.info[, compMW := sum(mw, na.rm=T), by=peakLocation]
+  complex.info[, elutionThreshold := mc$mass2Fraction(complexElutionThreshold * compMW)]
+  complex.info <- complex.info[peakLocation > elutionThreshold, goodPeak := FALSE]
+  complex.info <- complex.info[goodPeak == TRUE,]
   
   complex.info <- complex.info[,.(peakLocations = paste0(unique(peakLocation), collapse=';'),
                                   complex_id = comp_id,
                                   complex_name = complex.dt[complex_id == comp_id, unique(complex_name)],
                                   members=paste0(members, collapse=";"),
                                   nMembers = length(members),
-                                  CoelutingMembers=paste0(protein, collapse=";"),
-                                  nCoelutingMembers=.N,                                  peakHeight_mean = mean(peakHeight, na.rm=T),
+                                  coelutingMembers=paste0(unique(protein), collapse=";"),
+                                  nCoelutingMembers=length(unique(protein)),
+                                  peakHeight_mean = mean(peakHeight, na.rm=T),
                                   peakHeight_sd = sd(peakHeight, na.rm=T),
-                                  cofmN_mean=mean(cofmN.standardized, na.rm=T),
-                                  cofmN_sd=sd(cofmN.standardized, na.rm=T), # this or standardised?
-                                  cv_mean=mean(cv, na.rm=T), # not sure on these
-                                  cv_sd=sd(cv, na.rm=T),
-                                  var_man=mean(var, na.rm=T),
-                                  var_sd = sd(var, na.rm=T))
-                                  , by=peakCluster]
+                                  peakCenterofMass_mean=mean(cofmN.standardized, na.rm=T),
+                                  peakCenterofMass_sd=sd(cofmN.standardized, na.rm=T)
+  ), by=complexPeakCluster]
+  complex.info[, completeness := nCoelutingMembers/nMembers]
+  complex.info[, decoy := ifelse(grepl('decoy', complex_name), TRUE,FALSE)]
   
-  return(complex.info[nCoelutingMembers >= min.members])
+  return(complex.info[nCoelutingMembers >= min.members & completeness >= completenessThreshold])
 }
+
 
 summarizeCoelutingComplexes <- function(comp_id, complexes.toScore.dt, cor.dt){
   

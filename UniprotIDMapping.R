@@ -137,9 +137,9 @@ readLocalVersionOfRemoteFile<- function(localPath, url, reload = FALSE, ...){
 
 loadStringToUniprotFile <- function (species, dataDir = file.path(localDir, "data"), reload = FALSE){
   if(toupper(species) == "MOUSE"){
-    url <- "https://string-db.org/mapping_files/uniprot/mouse.uniprot_2_string.2018.tsv.gz"
+    url <- "https://string-db.org/mapping_files/uniprot/mouse.uniprot_2_string.tsv"
   } else if (toupper(species)  == "HUMAN"){
-    url <- "https://string-db.org/mapping_files/uniprot/human.uniprot_2_string.2018.tsv.gz"
+    url <- "https://string-db.org/mapping_files/uniprot/human.uniprot_2_string.tsv"
   }
   fileName <- basename(url)
   # try loading locally
