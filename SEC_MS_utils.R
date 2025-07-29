@@ -2114,7 +2114,6 @@ MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCo
   return(sec.dt)
 }
 
-
 #' function to interpolate missing values for missing/outlier fractions
 #' requires a sec.dt (longformat) with sample, treatment, replicate and intensity columns
 #' requires a qc.dt generated from the qcSummaryTable() function
@@ -2201,6 +2200,194 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   #return(interp.dt[, -c('ori.intensity')]) 
   return(interp.dt[, .(sample, condition, replicate, fraction, protein, intensity, interpolated, ori.intensity=originalIntensity, norm.intensity=ori.intensity)])
 }
+
+#' CCprofiler windowedRobustLoessNormalization implementation on sec long format data
+#' TODO invesigate why this is not exactly the same as CCprofiler implementation (variances in ~20% of id measurements in test data)
+windowedRobustLoessNormalization.CCprofiler <- function(sec.long, 
+                                                        samplesToNormalize=c('Infected_3', 'Uninfected_3'), # restrict normalization to a subset of samples
+                                                        window=3, #set window size for normalization. CCprofiler default
+                                                        step=1, #step size for normalization. CCprofiler default
+                                                        logTransform=TRUE,
+                                                        fractionCol='fraction', 
+                                                        intensityCol='intensity',
+                                                        fractionRange=seq(1,72,1), # limit normalization to fractions within this range
+                                                        nCores = 1,
+                                                        plot=T){
+  
+  # sanity checks 
+  stopifnot(all(samplesToNormalize %in% unique(sec.long$sample)))
+  stopifnot(class(sec.long[[fractionCol]]) == 'integer')
+  
+  sec.data <- copy(sec.long)
+  sec.data[, filename := paste0(sample, '__', get(fractionCol))]
+  
+  if (logTransform == TRUE){
+    message('Log transforming intensity values')
+    sec.data[get(intensityCol) < 1e-5, (intensityCol) := NA] # CCprofiler zeroes out intensities below this threshold... leave in
+    sec.data[, (intensityCol) := log2(get(intensityCol))]
+    #sec.data[ is.infinite(get(intensityCol)), (intensityCol) := NA] # conver ori scale 0s to logscale NA
+  }
+  idMapper <- sec.data[sample %in% samplesToNormalize, .(filename, sample, fractID=get(fractionCol))] %>% 
+    unique()
+  
+  # create a combined matrix of multiple samples
+  subMat <- dcast(sec.data[sample %in% samplesToNormalize,], protein~filename, value.var=intensityCol, fill=NA) %>% 
+      as.matrix(rownames='protein')
+  
+  #  window set for normalization
+  windowStarts <- seq(1, (max(fractionRange)-window+1), step)
+  windowEnds <- (windowStarts - step) + window
+
+  stopifnot(length(windowStarts) == length(windowEnds))
+  
+  window.ls <- lapply(1:length(windowStarts), function(idx){
+    seq(windowStarts[idx], windowEnds[idx], windowStep)
+  })
+  message('Normalizing ', paste0(samplesToNormalize, collapse =  ' '), ' intensities across ', length(window.ls), ' windows...')
+  
+  normMeasures <- pbmcapply::pbmclapply(window.ls, function(w){ 
+    samplesOI <- idMapper[fractID %in% w, filename]
+    norm.s <- limma::normalizeCyclicLoess(subMat[,samplesOI])
+    return(norm.s)
+  }, mc.cores = nCores) 
+
+  norm.dt <- do.call("rbind", lapply(normMeasures, reshape2::melt, na.rm=T)) %>% 
+    as.data.table()
+  setnames(norm.dt, c("protein", "filename", "intensity"))
+
+  # take the avg ints per fraciton/sample/protein
+  norm.dt[, mean.intensity := 2^(mean(intensity, na.rm=T)), by=.(protein, filename)]
+  norm.dt[, intensity := 2^intensity,]
+  norm.dt[, c('sample', 'fraction') := tstrsplit(filename, '__', keep=c(1,2))]
+  norm.dt[, fraction := as.integer(fraction)]
+  norm.dt[, protein := as.character(protein)]
+ 
+  # something here in order of operations different to CCprofiler and causing small variances.. investigate 
+  f.norm.dt <- norm.dt[, .(protein, sample, fraction, intensity, norm.intensity=mean.intensity)] %>% 
+    unique()
+  f.norm.dt <- f.norm.dt[, .(protein, sample, fraction, norm.intensity)] %>% 
+    unique()
+  
+  if (plot == TRUE){
+    
+    plot.dt <- sec.data[sample %in% samplesToNormalize, .(sumInts = sum(get(intensityCol), na.rm=T)), by=.(sample, fraction=get(fractionCol))]
+    
+    g <- ggplot(plot.dt, aes(x=fraction, y=sumInts, color=sample)) +
+      geom_point(shape=2) +
+      geom_line(aes(group=sample)) +
+      labs(title='Prior Loess Normalization') +
+      scale_x_continuous(breaks=fractionRange) +
+      scale_color_brewer(type='qual', palette=2, direction = -1) +
+      theme_bw()
+    
+    plot.dt <- f.norm.dt[, .(sumInts = sum(norm.intensity, na.rm=T)), by=.(sample, fraction)]
+    
+    p <- ggplot(plot.dt, aes(x=fraction, y=sumInts, color=sample)) +
+      geom_point(shape=2) +
+      geom_line(aes(group=sample)) +
+      labs(title='Post Loess Normalization') +
+      scale_x_continuous(breaks=fractionRange) +
+      scale_color_brewer(type='qual', palette=2, direction = -1) +
+      theme_bw()
+    
+    print(g);print(p)
+  }
+  
+  # merge normalized output with the input matrix and return normalized output
+  message('Input datatable size: ', dim(sec.long))
+  message('Normalized datatable size: ', dim(f.norm.dt))
+  comb.dt <- merge(x=sec.long, y=f.norm.dt, by=c('sample', 'protein', 'fraction'), all=T)
+  message('Combined datatable size: ', dim(comb.dt))
+  return(comb.dt)
+}
+
+#' Normalize intensities in a long format data.table to a control sample
+#' This function just shifts the median of each fraction in the sample to match the median of the control sample per fraction
+normalizeMedianIntsToMatchedControl <- function(sec.long, 
+                                                controlReference, # reference sample for alignemnt
+                                                samplesToNormalize='Infected_3',
+                                                logTransform=TRUE,
+                                                fractionCol='fraction', 
+                                                fractionRange=seq(1,72,1), # limit normalization to fractions within this range
+                                                plot=T){
+  
+  if (!fractionCol %in% colnames(sec.long)){
+    stop('Fraction column missing.\nCheck fractions are aligned to control prior to normalization')
+  }
+  sec.data <- copy(sec.long)
+  sec.data[, fractionCol := as.integer(get(fractionCol))] # creating a n internal integer fractionID for safe merging. Remve later
+  
+  .makeOneMatrix <- function(subdt){
+    submat <- dcast(subdt, protein~fractionCol, value.var='intensity', fill = NA) %>% 
+      as.matrix(rownames='protein')
+    return(submat)
+  }
+  
+  otherSamples <- samplesToNormalize
+  ctrl.mat <- .makeOneMatrix(sec.data[sample == controlReference])
+  
+  otherMats <- lapply(otherSamples, function(s){oneMat <- .makeOneMatrix(sec.data[sample %in% s,]); return(oneMat)})
+  names(otherMats) <- otherSamples
+  
+  if (logTransform == TRUE){
+      message('Log transforming intensities....\nTo disable set `logTransform = FALSE`')
+      ctrl.mat <- log2(ctrl.mat)
+      otherMats <- lapply(otherMats, log2)
+  }
+  
+  ctrl.medians <- apply(ctrl.mat, 2, median, na.rm=TRUE)
+  message('Normalizing fractions ', paste(fractionRange, collapse=' '))
+
+  otherSample.medians <- lapply(otherMats, function(x){ apply(x, 2, median, na.rm=TRUE) })
+  offsets <- lapply(otherSample.medians, function(x) ctrl.medians - x)
+  # handle fractions with NA (missing fractions etc.)
+  offsets <- lapply(offsets, function(x) {
+    x[is.na(x)] <- 0
+    x[!names(ctrl.medians) %in% as.character(fractionRange)] <-  0
+    data.table(fractionCol=as.integer(names(x)), offset=x) 
+  }) %>% 
+  rbindlist(idcol='sample')
+
+  sec.data[, ctrlNorm.intensity := intensity]
+  if (logTransform) {
+    sec.data[, ctrlNorm.intensity := log2(ctrlNorm.intensity)]
+  }
+  
+  sec.data <- merge(sec.data, offsets, by = c("sample", "fractionCol"), all.x = TRUE)
+  sec.data[!is.na(ctrlNorm.intensity), ctrlNorm.intensity := ctrlNorm.intensity + offset]
+
+  if (plot == TRUE){
+    lapply(otherSamples, function(s){
+      
+         g <- ggplot(sec.data[sample == s], aes(x=as.factor(fractionCol), y=log2(intensity))) +
+           geom_boxplot(color='black', outlier.shape = NA, alpha=0.5) +
+           geom_point(data=sec.data[sample == controlReference, .(intensity=median(log2(intensity), na.rm=T)), by=.(fractionCol=as.factor(fractionCol))],  aes(x=fractionCol, y=intensity), color='cornflowerblue', shape=17, size=2) +
+           labs(title=paste0(s, ' normalized to ',controlReference)) +
+           geom_boxplot(data=sec.data[sample == s], aes(x=as.factor(fractionCol), y=ctrlNorm.intensity), color='darkred', outlier.shape = NA, alpha=0.5) +
+           theme_bw()
+         
+         plot(g)
+         
+        plot.dt <- sec.data[sample == s, .(fractionCol, offset)] %>% 
+           unique()
+         
+         p <- ggplot(plot.dt, aes(x=fractionCol, y=offset)) +
+           geom_bar(stat='identity', fill='cornflowerblue', col='black') +
+           labs(title=paste0(s, ' median offset from ',controlReference)) +
+           scale_x_continuous(n.breaks = 10) +
+           #coord_flip() +
+           theme_bw()
+         
+         plot(p)
+    })
+  }
+  
+  sec.data[, ctrlNorm.intensity := 2^ctrlNorm.intensity]
+  sec.data[!sample %in% c(samplesToNormalize), ctrlNorm.intensity := intensity]
+  sec.data[ ,c('fractionCol', 'offset') := NULL]
+  return(sec.data)
+}
+
 
 #' get pairwise distances between proteins in the corum database
 #' Option to use the given db to calculate distances or base distances on STRING network
