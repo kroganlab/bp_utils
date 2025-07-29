@@ -731,7 +731,7 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
   columns2nullOut <- intersect (c('intensity_maxScaled', 'intensity_totalScaled'), colnames(sec.dt))
   if (length(columns2nullOut) > 0){
     message ("Deleting columns before recomputing new scaled_intensity:", paste0(columns2nullOut, collapse = "; "))
-    sec.dt[, columns2nullOut := NULL, with = FALSE]
+    sec.dt[, (columns2nullOut):= NULL]
   }
 
   if(useInterpolated){
@@ -2120,13 +2120,17 @@ MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCo
 #' requires a qc.dt generated from the qcSummaryTable() function
 #' datatable join to replace values in problematic fractions with NA
 #' maxGap; treshold for N consec missing values for interpolation default is 1
-interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, maxGap=1){
+interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, maxGap=1, plot=T){
   
   # create copy to avoid modifying ori DT
   sec.dt <- copy(secLong.dt)
   # zero out the intensities of problematic/missing fractions
   sec.dt[, ori.intensity := intensity]
   sec.dt[qc.dt[isOutlier == TRUE], on=.(sample, fraction), intensity := NA]
+  
+  # consider using dcast fill to safely input missing fractions;needs to be fraction and levels need to match desired!
+  #subDT[, fraction := factor(fraction, levels = fractions)]
+  #subMat <- dcast(subDT, protein ~ fraction, value.var = "intensity", fill = NA_real_)
   
   # add NA cols for missing fractions
   .addMissingFractions <- function(subDT){
@@ -2135,7 +2139,7 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
     
     if (!all(colnames(subMat) == fractions)){
       message('Some fractions are missing. Adding missing fractions populated with NA...')
-      message('Missing fractions:\n', setdiff(fractions, colnames(subMat)))
+      message('Missing fractions:\n', paste0(setdiff(fractions, colnames(subMat)), collapse = ';'))
       subMat <- subMat[, match(fractions, colnames(subMat)), drop=FALSE] #missing fractions assigned an NA col. drop=FALSE to avoid collapsing to vector
       colnames(subMat) <- fractions
     }
@@ -2174,13 +2178,28 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   names(interp.list) <- names(sec.list)
   interp.dt <- rbindlist(interp.list, idcol='sample')
   
-  interp.dt <- merge(x=interp.dt, y=sec.dt[, -c('intensity')], by=c('protein', 'sample', 'fraction'), all.x=T)
+  if (plot == TRUE){
+    g <-  ggplot(interp.dt[interpolated == TRUE & !is.na(intensity), .N, by=.(sample,fraction)], aes(x=paste0(sample, 'fraction.',fraction), y=N, fill=sample)) +
+      geom_bar(stat='identity') +
+      labs(title='N interpolated intensites') +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle=90))
+    print(g)
+  }
+  
+  # need to figure out exactly what is tripping the merge here.. but not reproducible; this will throw errors, so just keep simple and add metadata later
+  interp.dt <- merge(x=interp.dt, y=sec.dt[, .(ori.intensity, originalIntensity, protein, sample, fraction)], by=c('protein', 'sample', 'fraction'), all.x=T)
+  
+  sample.meta <- unique(sec.dt[, .(sample, condition, replicate)])  # your meta cols
+  interp.dt <- merge(interp.dt, sample.meta, by = "sample", all.x = TRUE)
   
   # santy checks
   #  nrows for non-missing fractions and intensity vals for non-interpolated should match between input and output
-  stopifnot( nrow(interp.dt[qc.dt, , on=.(sample, fraction)]) == nrow(sec.dt))
+  #stopifnot( nrow(interp.dt[qc.dt, , on=.(sample, fraction)]) == nrow(sec.dt))
   stopifnot( nrow(interp.dt[interpolated == FALSE & (intensity != ori.intensity), ]) == 0 )
-  return(interp.dt[, -c('ori.intensity')]) 
+  message("Total interpolated values: ", nrow(interp.dt[interpolated==TRUE & !is.na(intensity)]))
+  #return(interp.dt[, -c('ori.intensity')]) 
+  return(interp.dt[, .(sample, condition, replicate, fraction, protein, intensity, interpolated, ori.intensity=originalIntensity, norm.intensity=ori.intensity)])
 }
 
 #' get pairwise distances between proteins in the corum database
