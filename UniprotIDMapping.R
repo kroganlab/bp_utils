@@ -751,6 +751,7 @@ multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep =
   return(mapper[toGenes,,on="uniprotSites"]$geneSite)
 }
 
+# can map to ENSEMBL; ENSEMBLPROT; ENSEMBLTRANS
 multiUniprots2multisomething <- function (uniprots, sep = ";", something = "ENSEMBL", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE){
   toGenes <- data.table(uniprots = uniprots)
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
