@@ -687,7 +687,17 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
   return (mapTable$uniprot)
 }
 
-
+translateGeneName2Uniprot.datFile <- function(GeneNames, species="HUMAN", path = NULL){
+  if (toupper(species) == "HUMAN"){
+    idMapper <- loadHumanIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "MOUSE"){
+    idMapper <- loadMouseIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "RAT"){
+    idMapper <- loadRatIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }
+  setnames(idMapper, old=c("id"), new=c("geneName"))
+  idMapper[match(GeneNames, geneName), uniprot]
+}
 
 
 
