@@ -203,6 +203,13 @@ simplifyEnrichBySimilarUniverseMembership <- function(enrichResultsTable, gmt, g
     setnames(enrichResultsTable, old= "cluster", new = "cluster.x")
   }
   
+  otherClashingColumns <- c("setSize")
+  if (any(otherClashingColumns %in% colnames(enrichResultsTable))){
+    clashingColumns <- intersect(otherClashingColumns, colnames(enrichResultsTable))
+    stop("Clashing columns found. Rename these and retry: ", paste0(clashingColumns, collapse = ', ') )
+    
+  }
+  
   # expect gmt in term2gene first 2 column format
   gmt.subset <- gmt[gmt[[1]] %in% sig_go_terms, 1:2]
   setnames(gmt.subset, new = c("ont", "gene"))

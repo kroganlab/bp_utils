@@ -730,8 +730,8 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
   # reset to ensure intended ints vals (interpolated/no interpolation) used 
   columns2nullOut <- intersect (c('intensity_maxScaled', 'intensity_totalScaled'), colnames(sec.dt))
   if (length(columns2nullOut) > 0){
-    message ("Deleting columns before recomputing new scaled_intensity:", paste0(columns2nullOut, collapse = "; "))
-    sec.dt[, (columns2nullOut):= NULL]
+    #message ("Deleting columns before recomputing new scaled_intensity:", paste0(columns2nullOut, collapse = "; "))
+    sec.dt[, (columns2nullOut) := NULL]
   }
 
   if(useInterpolated){
@@ -1002,9 +1002,20 @@ cosineMatrix <- function(mat){
   # Thanks Brad!
   sim <- mat / sqrt(rowSums(mat * mat))
   sim <- sim %*% t(sim)
-  diag(sim) <- 
+  #diag(sim) <- 
   return (sim)
 } 
+
+
+
+cosine2matrix <- function (matA, matB){
+  stopifnot(all(rownames(matA) == rownames(matB)))
+  sumSqrdA <- rowSums(matA * matA)
+  sumSqrdB <- rowSums(matB * matB)
+  rowSumsAB <- rowSums(matA * matB)
+  
+  rowSumsAB/sqrt(sumSqrdA * sumSqrdB)
+}
 
 
 # windowedCosineSimilarity <- function (intensity.mat, window = 15){
@@ -1852,7 +1863,8 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
                        data = subData,
                        span = 0.25)
   
-  message ("Adding/updating column cofmN.standardized with standardized peak cofmN")
+  message ("Removing than Adding column cofmN.standardized (ignore does not exist warning)")
+  otherPeaks[, cofmN.standardized := NULL]
   otherPeaks[cofmN >= trimFitAt, cofmN.standardized := predict (loess.model, cofmN)]
   #otherPeaks[, cofmN.standardized := predict (loess.model, cofmN)]
   
@@ -1872,6 +1884,7 @@ standardizeOnePeakTableToStandard <- function (otherPeaks, standardPeaks, sec.dt
   otherPeaks[cofmN > max(otherRange), cofmN.standardized := .linearInterpolateY(cofmN, xRange = c(max(otherRange), lastPeak), y = c(max(standardRange),  lastPeak)) ]
 
   message ("Updating sec.dt with standardFraction for sample ", sampleName)
+  sec.dt[sample == sampleName, standardFraction := NA_real_]
   sec.dt[ sample == sampleName & fraction >= trimFitAt, standardFraction := predict (loess.model, fraction)]
   #sec.dt[ sample == sampleName , standardFraction := predict (loess.model, fraction)]
   sec.dt[fraction < min(otherRange) & sample == sampleName, standardFraction := .linearInterpolateY(fraction, xRange = c(firstPeak, min(otherRange)), y = c(firstPeak, min(standardRange)))]
@@ -1978,6 +1991,28 @@ calculateFractionMassConverters <- function(st){
 
 # peak differential statistics ----
 
+interpolateAtIntegerStandardFractions <- function(sec.dt, minFraction =1, maxFraction = 72, interpolateOverMissingValues = FALSE){
+  .oneProtein <- function(standardFraction, intensity_totalScaled){
+    tryCatch({
+      #print (sum(!is.na(intensity_totalScaled)))
+      r <- approx(x = standardFraction, y = intensity_totalScaled, 
+                  xout = minFraction:maxFraction,
+                  na.rm = interpolateOverMissingValues )# missing values will produce NAs at either side
+      c(r, list(error = NA_character_))
+    },
+    error = function(e)list(x = NA_integer_, y = NA_real_, error = e$message)
+    )
+  }
+  
+  ip.dt <- sec.dt[,.oneProtein(standardFraction, intensity_totalScaled) ,  
+                  by = .(sample, treatment, protein)]
+  
+  setnames(ip.dt, old = c("x", "y"), new = c("standardFraction", "intensity_totalScaled"))
+  
+  return (ip.dt)
+}
+
+
 clusterPeaks <- function(peakCenters, maxDistance = 2){
   if (length(peakCenters) <= 1){
     return (rep(1, length(peakCenters)))
@@ -1986,8 +2021,6 @@ clusterPeaks <- function(peakCenters, maxDistance = 2){
     hclust(method = "complete") |>
     cutree(h = maxDistance)
 }
-
-
 
 diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
   # we work in log space, so zeros need to get replaced with NA
@@ -2000,12 +2033,28 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
   
   #onePeakSec.dt[, fitted := 2^predict(lmout)]
   
-  if (!is.null(doPlotFunction)){
-    fittedCurve <- data.table(treatment = unique(onePeakSec.dt$treatment))[, .(standardFraction = seq(from = min(onePeakSec.dt$standardFraction), to = max(onePeakSec.dt$standardFraction), length = 100)), by = treatment]
-    fittedCurve[, intensity_totalScaled := 2^predict (lmout, newdata = fittedCurve)] 
-    fittedCurve[, intensity_totalScaled.noInteraction := 2^predict (lmout.noInteraction, newdata = fittedCurve)] 
+    # fittedCurve <- data.table(treatment = unique(onePeakSec.dt$treatment))[, .(standardFraction = seq(from = min(onePeakSec.dt$standardFraction), to = max(onePeakSec.dt$standardFraction), length = 100)), by = treatment]
+    # fittedCurve[, log2_intensity_totalScaled := predict (lmout, newdata = fittedCurve)] 
+    # fittedCurve[, intensity_totalScaled := 2^log2_intensity_totalScaled] 
+    # fittedCurve[, intensity_totalScaled.noInteraction := 2^predict (lmout.noInteraction, newdata = fittedCurve)] 
+    # 
+    # # all treatments paired
+    # treatmentPairs <- data.table(treat1 = unique(fittedCurve$treatment))[, .(treat2 = unique(fittedCurve$treatment)), by = treat1 ][treat1 < treat2]
+    # 
+    # treatmentPairs[, deltaScaledIntensity := sum(fittedCurve[treat1, intensity_totalScaled, on = "treatment"] - 
+    #                                                fittedCurve[treat2, intensity_totalScaled, on = "treatment"],
+    #                                              na.rm = TRUE),
+    #                by = .(treat1, treat2)]
+    # 
+    # treatmentPairs[, deltaLog2 := sum(fittedCurve[treat1, log2_intensity_totalScaled, on = "treatment"] - 
+    #                                     fittedCurve[treat2, log2_intensity_totalScaled, on = "treatment"],
+    #                                   na.rm = TRUE),
+    #                by = .(treat1, treat2)]
+    # 
     
-    p <- ggplot(onePeakSec.dt, aes(x =standardFraction, y = intensity_totalScaled,color = treatment)) +
+    
+    if (!is.null(doPlotFunction)){
+      p <- ggplot(onePeakSec.dt, aes(x =standardFraction, y = intensity_totalScaled,color = treatment)) +
       geom_point(aes(shape = as.factor(replicate))) + 
       geom_line(aes(color = treatment, group = sample)) +
       geom_line(data= fittedCurve, lwd = 1.5, alpha = .5) +
@@ -2015,7 +2064,10 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
     if ("function" %in% class(doPlotFunction)){doPlotFunction(p)}else{print(p)}
     
   }
-  return(data.frame(anova(lmout)))
+  
+  anova.dt <- setDT(data.frame(anova(lmout)), keep.rownames = TRUE)
+  #setattr(anova.dt, "deltas", treatmentPairs)
+  return(anova.dt)
 }
 
 
@@ -2025,14 +2077,16 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
 anovaPeaksInOneProtein <- function(sec.dt, peakClusters, radius = 5, ... ){
   anova.tables <- lapply(peakClusters$proteinPeakCluster,
                          function(clusterID){
-                           peakClusters[clusterID, subsetAndDiffAnova.oneProtein(sec.dt, center, radius = radius, ...)] 
+                           peakClusters[clusterID, .subsetAndDiffAnova.onePeak(sec.dt, center, radius = radius, ...)] 
                            }) |> suppressWarnings()
 
   allAnova <- rbindlist(anova.tables, idcol = "proteinPeakCluster", fill = TRUE, use.names = TRUE)
+  #allDiffs <- lapply(allAnova, function(x)attributes(x)$deltas)
+  #setattr(allAnova, "deltas", allDiffs)
   return (allAnova)
 }
 
-subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
+.subsetAndDiffAnova.onePeak <- function(sec.dt, peakCenter, radius = 5, ...){
   stopifnot (length(unique(sec.dt$protein)) <= 1) # only intended for one protein
   if (length(unique(sec.dt$protein)) == 0){
     return(data.table(error = "No data for protein"))
@@ -2041,10 +2095,237 @@ subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
   result <- tryCatch( as.data.table(diffAnovaOnePeak(onePeak, ...), keep.rownames = TRUE),
                       error = function(cond){
                         return (data.table(error = conditionMessage(cond)))
+                      },
+                      warning = function(cond){
+                        return (data.table(error = conditionMessage(cond)))
                       }
   )
   return (result)
 }
+## t tests ----
+
+#' Works on a single peak at a time. Compares treatments by matching fractions.
+#' @param secSinglePeak.dt a sec.dt for a single peak and protein. 
+#'                         Requires columns sample, treatment, intensity_totalScaled, standardFraction
+#' @param integerFractions boolean set to TRUE if standardFraction is already in whole numbers
+#'                         if FALSE this will do the work of interpolating to integer fractions
+tTestFractionMatchedOnePeak <- function(secSinglePeak.dt, integerFractions = TRUE){
+  if (!integerFractions){
+    integerFractionRange <- secSinglePeak.dt[, c(min(ceiling(standardFraction)), 
+                                                 max(floor(standardFraction)))]
+    
+    #linear interpolate at integer fractions
+    # approx does linear interpolation at defined xout values
+    ip.dt <- secSinglePeak.dt[, approx(.(x = standardFraction, y = intensity_totalScaled), 
+                                       xout = integerFractionRange[1]:integerFractionRange[2],
+                                       na.rm = FALSE ), # missing values will be 
+                              by = .(sample, treatment)]
+    setnames(ip.dt, old = c("x", "y"), new = c("standardFraction", "intensity_totalScaled"))
+    
+  }else{
+    ip.dt <- secSinglePeak.dt
+  }
+  
+  coef.dt <- tryCatch({
+    coef.dt <- lm ( intensity_totalScaled~as.factor(standardFraction)+treatment, data = ip.dt) |>
+      summary() |>
+      coefficients() |>
+      as.data.table(keep.rownames = TRUE)
+    setnames(coef.dt, new = c("term", "deltaInt", "SE", "t", "p"))
+    coef.dt <- coef.dt[grep ("^treatment", term)]
+    coef.dt[, term := gsub ("^treatment", "", term)]
+    coef.dt
+  }, 
+  error = function(e){
+    return (data.table(error = conditionMessage(e)))
+  },
+  warning = function(cond){
+    return (data.table(error = conditionMessage(cond)))
+  })
+  
+  
+  return (coef.dt)
+}
+
+#' Works onall peaks in a single protein. Compares treatments by matching fractions.
+#' @param singleProteinSec.dt a sec.dt for single protein, all fractions. 
+#'                         Requires columns sample, treatment, intensity_totalScaled, standardFraction
+#' @param peakClusters a data.table of peakClusters (cluster, center)
+#' @param radius how many fractions around center to include in analysis
+#' @param integerFractions boolean set to TRUE if standardFraction is already in whole numbers
+#'                         if FALSE this will do the work of interpolating to integer fractions
+
+tTestsFractionMatchedOneProtein <- function(singleProteinSec.dt, peakClusters, radius = 3.5, ...){
+  singleProteinSec.dt <- interpolateAtIntegerStandardFractions(singleProteinSec.dt)
+  results <- lapply(peakClusters$proteinPeakCluster,
+         function(clusterID){
+           peakClusters[proteinPeakCluster == clusterID,
+                          tTestFractionMatchedOnePeak(singleProteinSec.dt[ standardFraction %between% (c(-radius, radius) + center)], 
+                                                      ...)
+                        ]
+         })
+  
+  rbindlist(results, idcol = "proteinPeakCluster", use.names = TRUE, fill = TRUE)
+}
+
+tTestFractionSummedOnePeak <- function(secSinglePeak.dt){
+  leftBound <- secSinglePeak.dt[!is.na(intensity_totalScaled), min(standardFraction), by= sample][, ceiling(max(V1))]
+  rightBound <- secSinglePeak.dt[!is.na(intensity_totalScaled), max(standardFraction), by= sample][, floor(min(V1))]
+  
+  # interpolate the left and right bounds:
+  .approxBounds <- function(x,y,leftBound, rightBound){
+    tryCatch(
+    approx(x = standardFraction, y = intensity_totalScaled, 
+           xout = c(leftBound, rightBound),
+           na.rm = TRUE ),
+    error = function(e)data.table(x = c(leftBound, rightBound), y = 0.0)
+    )
+  }
+  ip.dt <- secSinglePeak.dt[, .approxBounds (standardFraction, intensity_totalScaled, leftBound, rightBound), 
+                            by = .(sample, treatment)]
+  setnames(ip.dt, old = c("x", "y"), new = c("standardFraction", "intensity_totalScaled"))
+  
+  bounded.dt <- rbindlist ( list(og = secSinglePeak.dt[!is.na(intensity_totalScaled) & standardFraction %between% c(leftBound, rightBound)],
+                                 bounds = ip.dt), use.names = TRUE, fill = TRUE)
+  setorder(bounded.dt, sample, standardFraction)
+  
+  # calculating area of parallelograms, and sum
+  # diff is used to get distance between neighboring standardFractions
+  # define .laggedMeans which we'll use to get mean of neighboring intensities
+  .laggedMeans <- function(x){
+    n <- length(x)
+    (x[2:n] + x[1:(n-1)])/2
+  }
+  summed.dt <- bounded.dt[, .(areaUnderPeak = sum(.laggedMeans(intensity_totalScaled) * diff(standardFraction))), by = .(sample, treatment)]
+  
+  coef.dt <- tryCatch({
+    coef.dt <- lm(areaUnderPeak~treatment, data = summed.dt) |>
+      summary() |>
+      coefficients() |>
+      as.data.table(keep.rownames = TRUE)
+    
+    setnames(coef.dt, new = c("term", "deltaInt", "SE", "t", "p"))
+    coef.dt <- coef.dt[grep ("^treatment", term)]
+    coef.dt[, term := gsub ("^treatment", "", term)]
+    coef.dt
+    
+  }, 
+  error = function(e){
+    return (data.table(error = conditionMessage(e)))
+  },
+  warning = function(cond){
+    return (data.table(error = conditionMessage(cond)))
+  })
+  return (coef.dt)
+}
+
+
+tTestsFractionSummedOneProtein <- function(singleProteinSec.dt, peakClusters, radius = 3.5, ...){
+    results <- lapply(peakClusters$proteinPeakCluster,
+                      function(clusterID){
+                        peakClusters[proteinPeakCluster == clusterID,
+                                     tTestFractionSummedOnePeak(singleProteinSec.dt[ standardFraction %between% (c(-radius, radius) + center)], 
+                                                                 ...)
+                        ]
+                      })
+    
+    rbindlist(results, idcol = "proteinPeakCluster", use.names = TRUE, fill = TRUE)
+  }
+
+
+## main contrast function ----
+
+#' doFullContrast
+#' @param localSec a sec.dt long table, often a subset that defines the contrasts of interest
+#' @param localAllpeaks a table of peaks, for best efficiency should match the samples in localSec
+
+doFullContrast <- function (localSec, localAllPeaks, anova = TRUE, ttestFractionMatched = TRUE, ttestFractionSummed = TRUE, numProcessors = 1){
+  # per protein, join peaks across runs into clusters
+  localAllPeaks[goodPeak == TRUE, proteinPeakCluster := clusterPeaks(cofmN.standardized, maxDistance = 2.5), by = protein]
+  
+  # per peak cluster (per protein), summarize to a center (and height etc, but most important is center)
+  peakClusters <- localAllPeaks[!is.na(proteinPeakCluster), 
+                                .(.N, meanPeakHeight  = mean(peakHeight), center = mean(cofmN.standardized)),
+                                keyby = .(protein, proteinPeakCluster)]
+  # split data into single-protein chunks
+  # peaks in the protein
+  peakClusters.subTables <- split(peakClusters, by = "protein")
+  
+  
+  # sec data per protein (only those in above table)
+  allProteins <- names(peakClusters.subTables)
+  sec.subTables <- split(localSec[protein %in% allProteins], by = "protein" )
+  
+  # iterate over proteins
+  names(allProteins) <- allProteins
+  
+  # ANOVA : fit peaks and F tests for different fit per treatment
+  if (anova){
+    anova.ls <- pbapply::pblapply(allProteins, function(proteinOI) anovaPeaksInOneProtein(sec.subTables[[proteinOI]], peakClusters.subTables[[proteinOI]], radius = 5),
+                                  cl = numProcessors)
+    # format output
+    anova.dt <- rbindlist(anova.ls, use.names = TRUE, fill = TRUE, idcol = "protein")
+    # friendly names
+    setnames(anova.dt,
+             old = c("rn",         "Sum.Sq",     "Mean.Sq",    "F.value", "Pr..F."),
+             #old = c( "rn",        "Sum Sq",     "Mean Sq",    "F value", "Pr(>F)"),
+             new = c( "modelTerm", "SumSquares", "MeanSquare", "F",       "p.F"))
+
+    peakClusters[anova.dt[modelTerm == "poly(standardFraction, 4):treatment"], treatmentDiff.p := i.p.F]
+    peakClusters[anova.dt[modelTerm == "treatment"], treatmentIntensity.p := i.p.F]
+    setorder(peakClusters, treatmentDiff.p, na.last = TRUE)
+  }
+  
+  # T tests : per fraction, are some treatments consistently higher or lower than others
+  if (ttestFractionMatched){
+    ttestsFM <- pbapply::pblapply(allProteins, 
+                                  function(proteinOI) tTestsFractionMatchedOneProtein(sec.subTables[[proteinOI]], peakClusters.subTables[[proteinOI]], radius = 3.5),
+                                  cl = numProcessors)
+    allttFM <- rbindlist(ttestsFM, idcol = "protein", use.names = TRUE, fill = TRUE)
+    setnames(allttFM,              old = c("deltaInt", "SE", "t", "p", "error"),
+             new = sprintf ("tMatch.%s", c(  "deltaInt", "SE", "t", "p", "error")),
+             skip_absent=TRUE)
+  }else{allttFM <- NULL}
+  
+  # T tests : summed across fractions, are some treatments consistently higher or lower than others
+  if (ttestFractionSummed){
+    ttestsFS <- pbapply::pblapply(allProteins,
+                                  function(proteinOI) tTestsFractionSummedOneProtein(sec.subTables[[proteinOI]], peakClusters.subTables[[proteinOI]], radius = 3.5),
+                                  cl = numProcessors)
+    allttFS <- rbindlist(ttestsFS, idcol = "protein", use.names = TRUE, fill = TRUE)
+    setnames(allttFS,              old = c("deltaInt", "SE", "t", "p", "error"),
+             new = sprintf ("tSum.%s", c("deltaInt", "SE", "t", "p", "error")),
+             skip_absent=TRUE)
+  }else{allttFS <- NULL}
+  
+  
+  # combine results as needed. 
+  ## first merge the different flavors of t tests
+  if (!is.null(allttFM) & !is.null(allttFS)){
+    alltt <- merge (allttFM, allttFS, by = c("protein", "proteinPeakCluster", "term"))
+    allttFM <- allttFS <- NULL
+  }else{alltt <- NULL}
+  
+  ## finally merge the relevant tt table 
+  if (!is.null(alltt)){
+    peakClusters <- merge (peakClusters, alltt, all.x = TRUE, by = c("protein", "proteinPeakCluster"))
+  }
+  if (!is.null(allttFM)){
+    peakClusters <- merge (peakClusters, allttFM, all.x = TRUE, by = c("protein", "proteinPeakCluster"))
+  }
+  if (!is.null(allttFS)){
+    peakClusters <- merge (peakClusters, allttFS, all.x = TRUE, by = c("protein", "proteinPeakCluster"))
+  }
+  
+  return (peakClusters)
+}
+
+
+
+
+
+
+
 
 
 
@@ -2063,9 +2344,9 @@ subsetAndDiffAnova.oneProtein <- function(sec.dt, peakCenter, radius = 5, ...){
 # }
 
 
-######
-## MG additional functions
-#####
+###### ---
+# MG additional functions ----
+##### ---
 
 #' return column with max consecutive detections per protein
 MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCol='intensity', detectionCutoff=0, plot=F){
@@ -2133,10 +2414,10 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   
   # add NA cols for missing fractions
   .addMissingFractions <- function(subDT){
-    subMat <- dcast(subDT, protein~fraction, value.var='intensity') %>% 
+    subMat <- dcast(subDT, protein~fraction, value.var='intensity') |> 
       as.matrix(rownames='protein')
     
-    if (!all(colnames(subMat) == fractions)){
+    if (!all(fractions %in% colnames(subMat))){
       message('Some fractions are missing. Adding missing fractions populated with NA...')
       message('Missing fractions:\n', paste0(setdiff(fractions, colnames(subMat)), collapse = ';'))
       subMat <- subMat[, match(fractions, colnames(subMat)), drop=FALSE] #missing fractions assigned an NA col. drop=FALSE to avoid collapsing to vector
@@ -2146,20 +2427,26 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   }
   
   .interpolateOutlierFractions <- function(subMat, sampleOI){
-    # interpolate intensity values in matrix rows
-    interpMat <- apply(subMat, 1, function(x) zoo::na.approx(x, na.rm=F, maxgap=maxGap)) %>% 
-      t()
     # fractions to update; restrict to outlier and/or missing
     fractionsOI <- c(qc.dt[sample == sampleOI & isOutlier == TRUE, unique(fraction)],
                      setdiff(fractions, sec.dt[sample == sampleOI, unique(fraction)])
                      )
-    
-    message('Handling problematic fractions for ', sampleOI, ': ', paste0(fractionsOI, collapse=','))
-    colsToupdate <- colnames(subMat) %in% fractionsOI
-    
-    # now apply the values from the interpolated matrix to the original
-    subMat[, colsToupdate] <- interpMat[, colsToupdate]
-    subdt <- setDT(reshape2::melt(subMat))
+    if (length(fractionsOI) > 0){
+      message('Handling problematic fractions for ', sampleOI, ': ', paste0(fractionsOI, collapse=','))
+      
+      # interpolate intensity values in matrix rows
+      interpMat <- apply(subMat, 1, function(x) zoo::na.approx(x, na.rm=F, maxgap=maxGap)) |> 
+        t()
+      colsToupdate <- colnames(subMat) %in% fractionsOI
+      
+      # now apply the values from the interpolated matrix to the original
+      subMat[, colsToupdate] <- interpMat[, colsToupdate]
+      subdt <- setDT(reshape2::melt(subMat))
+      
+    }else{
+      subdt <- setDT(reshape2::melt(subMat))
+    }
+      
     setnames(subdt, new=c('protein', 'fraction', 'intensity'))
     
     # add a flag to identify if the value is interpolated
@@ -2428,8 +2715,7 @@ calculatePPIDistancesInNetwork <- function(corum.db.path=NULL,
   # all-vy-all shortest paths calculation
   distMat <- igraph::distances(g)
   distMat <- distMat[rownames(distMat) %in% geneIDs, colnames(distMat) %in% geneIDs]
-  dist.dt <- as.data.table(reshape2::melt(distMat)) %>% 
-    .[value != 0]
+  dist.dt <- as.data.table(reshape2::melt(distMat))[value != 0]
   setnames(dist.dt, new=c('gene1', 'gene2', 'numberOfHops'))
   cols.oi <- c('gene1', 'gene2')
   dist.dt[, c(cols.oi) := lapply(.SD, as.character), .SDcols=cols.oi]
@@ -2456,8 +2742,8 @@ generateComplexTargetsAndDecoys <- function(corum.db.path=NULL,
                                        protein = unlist(strsplit(subunits_uniprot_id, ";"))), by=.(complex_id, complex_name)]
   corum.dt[, complex_size := length(unique(gene)), by=complex_id]
 
-  corumInfo <- corum.dt[, .(complex_id, complex_size)] %>% 
-    .[complex_size >= min_complex_size,] %>% 
+  corumInfo <- corum.dt[, .(complex_id, complex_size)
+                        ][complex_size >= min_complex_size,] |> 
       unique()
   
   # subset to distant proteins
