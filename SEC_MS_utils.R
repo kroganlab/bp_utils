@@ -273,7 +273,7 @@ qcFractionCorrelationLinePlot <- function(fullCor.long,
     theme(strip.text = element_text(color = facetTextColor))
   
   if (splitByReplicate){
-    p <- p + facet_grid(ref.replicate~ref.replicate)
+    p <- p + facet_grid(ref.treatment~ref.replicate)
   }  else{
     p <- p + facet_grid(ref.treatment~.)
   }
@@ -734,7 +734,7 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
     sec.dt[, (columns2nullOut):= NULL]
   }
 
-  if(useInterpolated){
+  if(useInterpolated==TRUE){
     message("Warning: Including interpolated values for missing & outlier fractions\nYou may want to remove these values from differential analysis by setting useInterpolated=FALSE")
   } else {
     if ("interpolated" %in% colnames(sec.dt))
@@ -2241,7 +2241,7 @@ windowedRobustLoessNormalization.CCprofiler <- function(sec.long,
   stopifnot(length(windowStarts) == length(windowEnds))
   
   window.ls <- lapply(1:length(windowStarts), function(idx){
-    seq(windowStarts[idx], windowEnds[idx], windowStep)
+    seq(windowStarts[idx], windowEnds[idx], window)
   })
   message('Normalizing ', paste0(samplesToNormalize, collapse =  ' '), ' intensities across ', length(window.ls), ' windows...')
   
