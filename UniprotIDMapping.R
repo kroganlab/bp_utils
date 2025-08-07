@@ -687,7 +687,17 @@ translateGeneName2Uniprot <- function(geneNames, species = "HUMAN", fillMissing 
   return (mapTable$uniprot)
 }
 
-
+translateGeneName2Uniprot.datFile <- function(GeneNames, species="HUMAN", path = NULL){
+  if (toupper(species) == "HUMAN"){
+    idMapper <- loadHumanIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "MOUSE"){
+    idMapper <- loadMouseIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }else if (toupper(species) == "RAT"){
+    idMapper <- loadRatIDDatMap(path = path)[idType == "Gene_Name",] #has columns uniprot,idType,id
+  }
+  setnames(idMapper, old=c("id"), new=c("geneName"))
+  idMapper[match(GeneNames, geneName), uniprot]
+}
 
 
 
@@ -751,7 +761,29 @@ multiUniprotSites2multiGeneSites <- function (uniprotSites, sep = ";", siteSep =
   return(mapper[toGenes,,on="uniprotSites"]$geneSite)
 }
 
-
+# can map to ENSEMBL; ENSEMBLPROT; ENSEMBLTRANS
+multiUniprots2multisomething <- function (uniprots, sep = ";", something = "ENSEMBL", species = "HUMAN", simplify = FALSE, useDatFile = FALSE, allowDups = FALSE){
+  toGenes <- data.table(uniprots = uniprots)
+  toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
+  toGenes[,singleGene := translateUniprot2Something(singleUniprot, something = something, species = species, useDatFile = useDatFile)]
+  toGenes <- toGenes[!is.na(singleGene), ]
+  if (simplify == TRUE){
+    simplify = function(x)unique(sort(x))
+  }else if (simplify == FALSE){
+    simplify = identity # do nothing
+  }else if (! "function" %in% class (simplify)){
+    stop("unexpected simplify format")
+  }
+  toGenes <- toGenes[, .(genes = paste(simplify (singleGene), collapse=sep)), by = uniprots]
+  if(!allowDups){
+    duplicatedGeneNames <- unique(toGenes[duplicated(genes)]$genes)
+    toGenes[genes %in% duplicatedGeneNames, genes := paste0(genes, ".", uniprots)]
+  }
+  
+  setkey(toGenes, uniprots)
+  
+  return(toGenes[uniprots, genes])
+}
 
 # gene aliases
 
