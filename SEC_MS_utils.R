@@ -693,10 +693,6 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 
 
 # scaling ----
-
-
-
-
 scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = FALSE){
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
   
@@ -3288,7 +3284,6 @@ createSyntheticProteinProfiles <- function(secLong.dt, ints.dt, intsCol='intensi
   return(mix.dt)
 }
 
-
 #' BP Function to calculate cosine similarity between rows of two matrices
 cosine2matrix <- function (matA, matB){
   stopifnot(all(rownames(matA) == rownames(matB)))
@@ -3338,7 +3333,6 @@ calculateCosineSimilarity <- function(sec.Long, samplesToCompare=c('CL_1','CL2')
   t.mat.ls <- .matchMatricesRownames(mat.ls)
   
   cos.res <- cosine2matrix(t.mat.ls[[1]], t.mat.ls[[2]])
-
   cos.dt <- data.table(protein=names(cos.res),
                        contrast=paste0(samplesToCompare, collapse=contrastSep),
                        cosineSimilarity=cos.res)
