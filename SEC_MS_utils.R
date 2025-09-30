@@ -2050,6 +2050,12 @@ diffAnovaOnePeak <- function (onePeakSec.dt, doPlotFunction = NULL){
     
     
     if (!is.null(doPlotFunction)){
+      #onePeakSec.dt[, fitted := 2^predict(lmout)]
+      
+      fittedCurve <- data.table(treatment = unique(onePeakSec.dt$treatment))[, .(standardFraction = seq(from = min(onePeakSec.dt$standardFraction), to = max(onePeakSec.dt$standardFraction), length = 100)), by = treatment]
+      fittedCurve[, log2_intensity_totalScaled := predict (lmout, newdata = fittedCurve)]
+      fittedCurve[, intensity_totalScaled := 2^log2_intensity_totalScaled]
+      fittedCurve[, intensity_totalScaled.noInteraction := 2^predict (lmout.noInteraction, newdata = fittedCurve)]
       p <- ggplot(onePeakSec.dt, aes(x =standardFraction, y = intensity_totalScaled,color = treatment)) +
       geom_point(aes(shape = as.factor(replicate))) + 
       geom_line(aes(color = treatment, group = sample)) +
@@ -2164,6 +2170,9 @@ tTestsFractionMatchedOneProtein <- function(singleProteinSec.dt, peakClusters, r
   rbindlist(results, idcol = "proteinPeakCluster", use.names = TRUE, fill = TRUE)
 }
 
+
+# this function needs testing, especially around missing values and boundary imputation
+
 tTestFractionSummedOnePeak <- function(secSinglePeak.dt){
   leftBound <- secSinglePeak.dt[!is.na(intensity_totalScaled), min(standardFraction), by= sample][, ceiling(max(V1))]
   rightBound <- secSinglePeak.dt[!is.na(intensity_totalScaled), max(standardFraction), by= sample][, floor(min(V1))]
@@ -2261,6 +2270,7 @@ doFullContrast <- function (localSec, localAllPeaks, anova = TRUE, ttestFraction
                                   cl = numProcessors)
     # format output
     anova.dt <- rbindlist(anova.ls, use.names = TRUE, fill = TRUE, idcol = "protein")
+    anova.dt[, message (sum(!is.na(error)), " of ", .N, " tested peak windows had errors during ANOVA"), ]
     # friendly names
     setnames(anova.dt,
              old = c("rn",         "Sum.Sq",     "Mean.Sq",    "F.value", "Pr..F."),
@@ -2472,7 +2482,7 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   # need to figure out exactly what is tripping the merge here.. but not reproducible; this will throw errors, so just keep simple and add metadata later
   interp.dt <- merge(x=interp.dt, y=sec.dt[, .(ori.intensity, originalIntensity, protein, sample, fraction)], by=c('protein', 'sample', 'fraction'), all.x=T)
   
-  sample.meta <- unique(sec.dt[, .(sample, condition, replicate)])  # your meta cols
+  sample.meta <- unique(sec.dt[, .(sample, treatment, replicate)])  # your meta cols
   interp.dt <- merge(interp.dt, sample.meta, by = "sample", all.x = TRUE)
   
   # santy checks
@@ -2481,7 +2491,7 @@ interpolateMissingAndOutlierFractions <- function(secLong.dt, qc.dt, fractions, 
   stopifnot( nrow(interp.dt[interpolated == FALSE & (intensity != ori.intensity), ]) == 0 )
   message("Total interpolated values: ", nrow(interp.dt[interpolated==TRUE & !is.na(intensity)]))
   #return(interp.dt[, -c('ori.intensity')]) 
-  return(interp.dt[, .(sample, condition, replicate, fraction, protein, intensity, interpolated, ori.intensity=originalIntensity, norm.intensity=ori.intensity)])
+  return(interp.dt[, .(sample, treatment, replicate, fraction, protein, intensity, interpolated, ori.intensity=originalIntensity, norm.intensity=ori.intensity)])
 }
 
 #' CCprofiler windowedRobustLoessNormalization implementation on sec long format data
