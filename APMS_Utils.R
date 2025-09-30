@@ -261,7 +261,7 @@ baitPreyDecoysFromString <- function (baits,
 
 baitPreyGoldStandardPairs <- function (baits,
                                        preys,
-                               corum.path = "~/Downloads/corum_humanComplexes.txt",
+                               corum.path = "~/Downloads/corum_humanComplexes.txt", # corum 5.0 downloaded 10/31/2024
                                string.links.path = "~/Downloads/9606.protein.physical.links.detailed.v12.0.txt.gz",
                                string.info.path = "~/Downloads/9606.protein.info.v12.0.txt.gz",
                                stringCombinedScoreThreshold = 600,

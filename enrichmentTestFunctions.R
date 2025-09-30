@@ -979,6 +979,25 @@ fastEnrich <- function (genesOrTable, gmt, minMatchSize= 3, universe = NULL, gro
 
 }
 
+#' Given the output of fastEnrich, it produces a table of similar format to the output of clusterProfiler::enricher
+#' @param fe.dt data.table output by fastEnrich
+
+fastEnrich2ClusterProfilerTable <- function(fe.dt){
+  columnsNeededInInput <- c("set", "groupANDsetSize", "groupSize", "setSize", "universeSize", "log10P", "genes")
+  columnsNeededInOutput <- c("ID","Description","GeneRatio","BgRatio","pvalue","p.adjust","qvalue","geneID","Count")
+  
+  fe.dt[, .(ID = set, Description = set,
+            GeneRatio = sprintf ("%d/%d",groupANDsetSize , groupSize ),
+            BgRatio = sprintf ("%d/%d", setSize, universeSize),
+            pvalue = 10^log10P,
+            p.adjust = p.adjust(10^log10P, method = "BH"),
+            qvalue = p.adjust(10^log10P, method = "BH"),
+            geneID = genes,
+            Count = groupANDsetSize),
+        by = group]
+}
+
+
 # fastEnrichClusterTable <- function (cluster.dt, gmt, minMatchSize = 3){
 #   mutualProteins <- intersect(cluster.dt$protein, unique(gmt$gene))
 #   
