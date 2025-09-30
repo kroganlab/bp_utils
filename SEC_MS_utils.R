@@ -273,7 +273,7 @@ qcFractionCorrelationLinePlot <- function(fullCor.long,
     theme(strip.text = element_text(color = facetTextColor))
   
   if (splitByReplicate){
-    p <- p + facet_grid(ref.replicate~ref.replicate)
+    p <- p + facet_grid(ref.treatment~ref.replicate)
   }  else{
     p <- p + facet_grid(ref.treatment~.)
   }
@@ -693,10 +693,6 @@ enrichHeatmap <- function(enrich.dt, cluster.dt, minPValue, clustersOI = NULL,
 
 
 # scaling ----
-
-
-
-
 scaleByTotalIntensity <- function(secLong.dt, preserveSampleRelativeIntensity = FALSE){
   secLong.dt[, intensity_totalScaled := intensity/(sum(intensity, na.rm = TRUE)), by= .(sample, protein)]
   
@@ -734,7 +730,7 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
     sec.dt[, (columns2nullOut) := NULL]
   }
 
-  if(useInterpolated){
+  if(useInterpolated==TRUE){
     message("Warning: Including interpolated values for missing & outlier fractions\nYou may want to remove these values from differential analysis by setting useInterpolated=FALSE")
   } else {
     if ("interpolated" %in% colnames(sec.dt))
@@ -2528,7 +2524,7 @@ windowedRobustLoessNormalization.CCprofiler <- function(sec.long,
   stopifnot(length(windowStarts) == length(windowEnds))
   
   window.ls <- lapply(1:length(windowStarts), function(idx){
-    seq(windowStarts[idx], windowEnds[idx], windowStep)
+    seq(windowStarts[idx], windowEnds[idx], window)
   })
   message('Normalizing ', paste0(samplesToNormalize, collapse =  ' '), ' intensities across ', length(window.ls), ' windows...')
   
@@ -2674,7 +2670,6 @@ normalizeMedianIntsToMatchedControl <- function(sec.long,
   sec.data[ ,c('fractionCol', 'offset') := NULL]
   return(sec.data)
 }
-
 
 #' get pairwise distances between proteins in the corum database
 #' Option to use the given db to calculate distances or base distances on STRING network
@@ -3065,3 +3060,281 @@ return(new.traces.obj)
 }
 
 #traces.subset <- enforceTraceAndAnnotationRowOrder(traces.obj = traces.obj)
+
+#' Function to bin proteins by absolute intensity
+#' Bins proteins into equally sizes bins rather than ranges
+#' TODO option to use both approaches
+binProteinsByAbsIntensity <- function(secLong.dt, intsCol='intensity', bins=30){
+  sec.data <- copy(secLong.dt)
+  
+  sum.data <- sec.data[, .(sumInts=sum(get(intsCol), na.rm=T)), by=.(protein,sample)] %>% 
+    unique()
+  sum.vec <- sum.data$sumInts
+  names(sum.vec) <- sum.data$protein
+  
+  message('Dividing proteins into ', bins, ' bins based on absolute intensity')
+  
+  quantile.thres <- quantile(sum.vec, probs=(seq(1:bins)/bins))
+  # cut with vector arg to divide on ranges
+  sum.data[, bin := cut(sumInts, c(0,quantile.thres), include.lowest=T)]
+
+  #sum.data[, bin := cut(sumInts, bins, include.lowest=T)]
+  setorder(sum.data, sumInts, protein)
+  return(sum.data)
+}
+
+#' Function to generate synthetic data by mixing protein profiles from different clusters
+#' By default we take ints_totalScaled as the intensity column, but this can be changed
+#' By default, clusters are determined by hierarchical clustering of protein profiles using pearson distance and complete linkage. 
+createSyntheticProteinProfiles <- function(secLong.dt, ints.dt, intsCol='intensity_totalScaled',
+                                           distMeasure='pearson', clustMethod='complete', cutHeight=0.2, minClusterSize=10,
+                                           proportionFirstProtein=seq(0.1, 1, 0.1), 
+                                           plot=TRUE, nCores=1, ...){
+  
+  # setting up parallel processing 
+  if (nCores > parallel::detectCores()){
+    nCores <- parallel::detectCores() - 2 
+    message('Assigned more cores than available on the system!\nAllocating ', nCores)
+  }
+  
+  #' Convert dt to matrix format
+  .makeOneMatrix <- function(sub.dt, logTransform=FALSE, intsCol){
+    
+    pMat <- dcast(sub.dt, protein~fraction, value.var=intsCol) %>% 
+      as.matrix(rownames='protein')
+    
+    if (logTransform == T){
+      message('log transforming intensities')
+      pMat <- log2(pMat)
+    }
+    pMat[is.na(pMat)] <- 0
+    return(pMat)
+  }
+  
+  #' Cluster protein profiles using hierarchical clustering and assign to distinct clusters based on adjustable cutheight
+  .getProteinClusters <- function(mat, distMeasure, clustMethod, cutHeight, minClusterSize, p.title, ...){
+    
+    if (distMeasure == 'pearson'){
+      hc <- hclust(as.dist(1-cor(t(mat), method='pearson')), method=clustMethod)
+    } else if (distMeasure %in% c('manhattan', 'maximum','binary', 'euclidean')){
+      hc <- hclust(as.dist(mat, method=distMeasure), method=clustMethod)
+    } else {
+      stop('Specify a distMeasure and clustMethod')
+    }
+    # for now stick with dynamicTreeCut, but could maybe use a simplier approach..
+    cluster.assignments <- data.table(protein=hc$labels,
+                                      cluster=dynamicTreeCut::cutreeDynamic(hc, cutHeight = cutHeight, method='tree', minClusterSize = minClusterSize))
+    
+    message('Found ', cluster.assignments[cluster != 0, length(unique(cluster))], ' clusters')
+    #TODO fix this  dendogram plotting
+    if (plot == T){
+     # barplot of N proteins and N clusters 
+     g <- ggplot(cluster.assignments[cluster != 0,.N, by=cluster], aes(x=cluster, y=N)) +
+        geom_bar(stat='identity', color='black', fill='cornflowerblue') +
+        labs(title='N proteins assigned to clusters', y='N proteins', x='clusters') +
+        theme_bw()
+     print(g)
+    
+     # dendograom of the clustering... not sure how useful this is tbh... need to tidy visualization
+     dend <- as.dendrogram(hc)
+     
+     nModules <- length(unique(cluster.assignments$cluster))
+     col.pal <- randomcoloR::distinctColorPalette(k=nModules)
+     dend <- color_branches(dend, clusters=cluster.assignments$cluster, groupLabels = T, value=col.pal) 
+     labels(dend) <- '' # turn off labels
+     
+     par(mar = c(3,3,3,7))
+     
+     plot(dend, 
+      main = paste0('intensity bin ', p.title, ' clustering'),
+      horiz =  TRUE, 
+      nodePar = list(cex = .007))
+      legend("topleft", legend =unique(cluster.assignments$cluster), fill = col.pal)
+      #rect.dendrogram(dend, k = nModules, border = 8, lty = 2, lwd = 2) 
+    }
+    return(cluster.assignments[cluster != 0])
+  }
+
+  # give two clusters, mix their ints profiles in appropriate ratios
+  .mixProteinProfiles <- function(mat, clust1Prots, clust2Prots, nProteins, proportionFirstProtein=proportionFirstProtein, intsCol=intsCol,
+                                  distMeasure, clustMethod, cutHeight, minClusterSize,
+                                  plot=plot){
+    
+    stopifnot(length(clust1Prots) >= nProteins & length(clust2Prots) >= nProteins)
+    
+    clust1s <- sample(clust1Prots, nProteins, replace = FALSE)
+    clust2s <- sample(clust2Prots, nProteins, replace = FALSE)
+
+    # extract the rownames from the two matrices and reorder to match sampling
+    clust1mat <- mat[rownames(mat) %in% clust1s, ][clust1s,]
+    clust2mat <- mat[rownames(mat) %in% clust2s, ][clust2s,]
+
+    stopifnot(rownames(clust1mat) == clust1s & rownames(clust2mat) == clust2s)
+    
+    lapply(proportionFirstProtein, function(prop1){
+      
+      combMat <- (clust1mat*prop1) + (clust2mat*(1-prop1))
+      
+         if (plot == TRUE){
+           intsMats <- list('base protein'= clust1mat,
+                            'suppl. protein'= clust2mat,
+                            'mixture profile'=combMat)
+        
+           cols4Mats <- list('base protein'='red',
+                             'suppl. protein'='blue',
+                             'mixture profile'='purple')
+        
+        hm.ls <- suppressWarnings(intensityHeatmaps(intsMats, border=T, intensityName='intensity_totalScaled'))
+        
+        #linechart anno of the median protein profiles to get high lvl view of mixing
+        anno.ls <- lapply(names(intsMats), function(n){
+          median.ints <- apply(intsMats[[n]], 2, median, na.rm=T)
+          return(anno_lines(median.ints,
+                            gp=gpar(col=cols4Mats[[n]]),
+                            axis=ifelse(n=='base protein', TRUE, FALSE)
+                            ))
+        })
+        names(anno.ls) <- names(intsMats)
+        
+        col_ha <- HeatmapAnnotation('base protein'=anno.ls[[1]],
+                                    'suppl. protein'= anno.ls[[2]],
+                                    'mixture profile'=anno.ls[[3]], border=T)
+        
+        plot.ls <- lapply(names(intsMats), function(n){
+          
+          hm <- Heatmap(intsMats[[n]],
+                        border=T, 
+                        top_annotation = HeatmapAnnotation(n=anno.ls[[n]], show_annotation_name = F),
+                        cluster_rows = F,
+                        name='intensity_totalScaled',
+                        cluster_columns = F,
+                        column_names_gp = gpar(fontsize = 5),
+                        column_labels = ifelse(as.integer(colnames(intsMats[[n]])) %% 5 == 0, colnames(intsMats[[n]]), ""),
+                        col=viridis(10),
+                        show_row_names=F
+                        )
+        }) 
+        hmls <- plot.ls[[1]] + plot.ls[[2]] + plot.ls[[3]]
+        print(draw(hmls,  column_title=paste0('Mixing ratio: ', prop1, ' - ',1-prop1)))
+      }
+      #  Convert combMat to long  and tidy
+      comb.dt <- as.data.table(reshape2::melt(combMat))
+      setnames(comb.dt, new=c('protein', 'fraction', 'mixints'))
+      comb.dt <- merge(comb.dt, data.table(protein=clust1s, protein.mx=paste0(clust1s, '__', clust2s), proportionProteinOne=prop1), by='protein')
+      return(comb.dt[, .(protein.mx, proportionProteinOne, fraction, mixints)])
+   }) %>% 
+      rbindlist()
+  }
+  
+  # bin the intensities
+  mats.bins.ls <- lapply(unique(ints.dt$bin), function(b){
+    prots.oi <- ints.dt[bin == b, unique(protein)]
+    mat <- .makeOneMatrix(sub.dt = subdt[protein %in% prots.oi], intsCol=intsCol, logTransform = FALSE)
+    return(mat)
+  })
+  names(mats.bins.ls) <- unique(ints.dt$bin)
+
+  # identify clusters per ints bin
+  message('Using ', distMeasure, ' similarity measure with ', clustMethod, ' linkage')
+  message(cutHeight, ' dissimilarity threhold for clustering')
+    
+  clusts.ls <- lapply(names(mats.bins.ls), function(m){
+    message('Working on bin ', m)
+    cs <- .getProteinClusters(mats.bins.ls[[m]], distMeasure=distMeasure, clustMethod=clustMethod, cutHeight=cutHeight, minClusterSize=minClusterSize, p.title=m)
+    return(cs)
+  })
+  names(clusts.ls) <- names(mats.bins.ls)
+  
+  message('Mixing protein elution profiles')
+  message('mixing proportions:\nProtein1: ', proportionFirstProtein, '\nProtein2: ', (1-proportionFirstProtein))
+  
+  mix.dt <- pbmcapply::pbmclapply(names(mats.bins.ls), function(m){
+    
+    message('Getting protein clusters for bin ', m, '...')
+    clusters <- clusts.ls[[m]]
+
+    if (length(unique(clusters$cluster)) >= 2){
+      clust.vec <- combn(unique(clusters$cluster), 2) %>% 
+        t() %>% 
+        as.data.table()
+    
+      # TODO add some kind of similarity threshold of clusters to avoid mixing similar signals
+      if (nrow(clust.vec) >= 1){
+        
+        message('Mixing protein profiles...')
+        apply(clust.vec, 1, function(clustID){
+          
+          # subset pairing to the smallest cluster size
+          minProteins <- min(clusters[cluster %in% clustID,.N, by=cluster]$N)
+  
+          onePass.dt <- .mixProteinProfiles(mats.bins.ls[[m]], 
+                                            clusters[cluster==clustID[1], protein], clusters[cluster==clustID[2], protein], 
+                                            nProteins = minProteins, 
+                                            proportionFirstProtein=proportionFirstProtein,
+                                            plot=F)
+          onePass.dt[, clusters := paste0(clustID[1], '__', clustID[2])]
+          onePass.dt[, ints.bin := m] 
+        }) %>% 
+        rbindlist()
+      }
+    }  
+  }, mc.cores=nCores) %>% 
+  rbindlist()
+
+  return(mix.dt)
+}
+
+#' BP Function to calculate cosine similarity between rows of two matrices
+cosine2matrix <- function (matA, matB){
+  stopifnot(all(rownames(matA) == rownames(matB)))
+  sumSqrdA <- rowSums(matA * matA)
+  sumSqrdB <- rowSums(matB * matB)
+  rowSumsAB <- rowSums(matA * matB)
+
+  rowSumsAB/sqrt(sumSqrdA * sumSqrdB)
+}
+
+#' Wrapper function to calculate cosine similarity taking sec.long table as input format
+calculateCosineSimilarity <- function(sec.Long, samplesToCompare=c('CL_1','CL2'), intsCol='intensity', logTransform=FALSE, contrastSep='-'){
+  
+  stopifnot(length(samplesToCompare) == 2 | all(samplesToCompare %in% unique(sec.Long$sample)) )
+  
+  sec.data <- copy(sec.Long)
+  
+  .makeOneMatrix <- function(subdt, intsCol, logTransform){
+    submat <- dcast(subdt, protein~fraction, value.var = intsCol) %>% 
+      as.matrix(rownames='protein')
+    if (logTransform == TRUE){
+      message('Log transforming value')
+      submat <- log2(submat)
+    } 
+    submat[is.na(submat)] <- 0
+    return(submat)
+  }
+  
+  .matchMatricesRownames <- function(matrix.ls){
+    message('Subsetting to proteins in both matrices and reordering...')
+  
+    shared.prots <- Reduce(intersect, lapply(mat.ls, rownames))
+    message('Found ', length(shared.prots), ' shared proteins')
+    
+    tidy.mat.ls <- lapply(mat.ls, function(m){
+      m <- m[rownames(m) %in% shared.prots,][shared.prots,]
+      return(m)
+    })
+    return(tidy.mat.ls)
+  }
+  
+  mat.ls <- lapply(samplesToCompare, function(s){
+    .makeOneMatrix(sec.data[sample == s], intsCol, logTransform)
+  })
+  names(mat.ls) <- samplesToCompare
+
+  t.mat.ls <- .matchMatricesRownames(mat.ls)
+  
+  cos.res <- cosine2matrix(t.mat.ls[[1]], t.mat.ls[[2]])
+  cos.dt <- data.table(protein=names(cos.res),
+                       contrast=paste0(samplesToCompare, collapse=contrastSep),
+                       cosineSimilarity=cos.res)
+  return(cos.dt)
+}
