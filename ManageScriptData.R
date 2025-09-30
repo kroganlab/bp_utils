@@ -98,7 +98,7 @@ BackupAsPDF <- function(graphics, prefix = "", subDir = "", dimensions = NULL, o
   .png <- function(path, width, height){
     png(path, width, height, units = "in", res = 200)
   }
-  .imageFunction <- list(pdf = cairo_pdf, png = .png)[[format]]
+  .imageFunction <- list(pdf = cairo_pdf, png = .png, svg = svg, PDF = pdf)[[format]]
   
   cat (sprintf("Writing image to:  \n%s\n", path))
   .imageFunction(path, width = dimensions[1], height = dimensions[2])
