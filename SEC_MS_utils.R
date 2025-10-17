@@ -2369,6 +2369,10 @@ MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCo
     detectVec <- rle(row > cutoff)
     return(max(detectVec$lengths[detectVec$values == TRUE]))
   }
+  #' Identify the max run of consecutive measurmeents
+  .totalMeasurments <- function(row, cutoff=detectionCutoff){
+    return(sum(row > detectionCutoff))
+  }
   
   # one matrix per sample 
   mats <- lapply(split(secLong.dt, list(secLong.dt$sample)), .oneMatrix)
@@ -2378,24 +2382,30 @@ MaxConsecutiveDetections <- function(secLong.dt, idcol='peptideSequence', intsCo
     as.data.table(keep.rownames=T)
   }) %>% 
   rbindlist(idcol='sample')
-
   setnames(consec.dt, new=c('sample', 'feature', 'consecutiveDetections'))
+  
+  total.dt <- pbapply::pblapply(mats, function(x) {
+    apply(x, 1, function(feature){ .totalMeasurments(row = feature, cutoff = detectionCutoff) }) %>% 
+      as.data.table(keep.rownames=T)
+  }) %>% 
+    rbindlist(idcol='sample')
+  setnames(total.dt, new=c('sample', 'feature', 'totalDetections'))
  
   if (plot){
     
-    g <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
-      stat_ecdf() +
-      labs(title='Distribution of maximum consecutive detections per protein') +
-      theme_bw()
-    
     p <- ggplot(consec.dt, aes(x=consecutiveDetections, col=sample)) +
       geom_density() +
-      labs(title='Distribution of maximum consecutive detections per protein') +
+      labs(title='Max consecutive detections per protein') +
+      theme_bw()
+    
+    g <- ggplot(total.dt, aes(x=totalDetections, col=sample)) +
+      geom_density() +
+      labs(title='Total detections per protein') +
       theme_bw()
  
     print(p); print(g)
   }
-  
+  consec.dt <-  merge(x=consec.dt, y=total.dt, by=c('sample', 'feature'))
   sec.dt <- merge(x=secLong.dt, y=consec.dt, by.x=c('sample', idcol), by.y=c('sample', 'feature'), all.x=T)
   stopifnot(nrow(sec.dt) == nrow(secLong.dt))
   return(sec.dt)
