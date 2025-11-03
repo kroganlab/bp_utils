@@ -3358,3 +3358,28 @@ calculateCosineSimilarity <- function(sec.Long, samplesToCompare=c('CL_1','CL2')
                        cosineSimilarity=cos.res)
   return(cos.dt)
 }
+
+# --  Helper functions for preprocessing data for other tools ---
+
+#' Format CORUM complex database for EPIC input
+#' @param corum.dt path to CORUM complex database or data.table of CORUM  complex database
+#' @param min.members minimum number of complex members to retain complex (default=2)
+#' @returns tab-separated list of UniProt IDs per complex, one complex per line
+#' @export
+formatCORUMforEPIC <- function(corum.dt, min.members=2){
+  
+  if (class(corum.dt) == 'character'){
+    dt <- fread(corum.dt)
+  } else {
+    dt <- copy(corum.dt)
+  }
+  stopifnot(all(c('complex_id', 'complex_name', 'subunits_uniprot_id') %in% colnames(dt)))
+  
+  members <- strsplit(dt$subunits_uniprot_id, ';')
+  len.filter <- sapply(members, length) > min.members
+
+  return(do.call(rbind, lapply(members[len.filter], paste, collapse='\t')))
+}
+# example
+#fwrite(formatCORUMforEPIC('~/Documents/utils/mg_utils/data/corum_humanComplexes.txt', 3), sep='\t', col.names = F,quote=F, ScriptAndDatedFileName('corum.epic.format.txt'))
+
