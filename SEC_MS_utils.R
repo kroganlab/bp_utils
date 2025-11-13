@@ -1304,6 +1304,9 @@ scoreByGS <- function (sub.dt, denomDecoy, denomInteractor, column = "meanLL", g
 #'                  example https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz
 #'                  or a data.table with columns `#string_protein_id` and `preferred_name`
 #' @param combinedScoreThreshold only edges with combined score above this will be considered
+#' @param simplify.network if FALSE, return all edges from corum and string.
+#'                         if 'MST', reduce to minimum spanning tree
+#'                         if 'oneEdgePerProtein', reduce to a single edge per protein
 #' @param geneAliasFunction a function that will convert a list of genes to the canonical alias
 #'                          `function(charGeneVector){... return(charGeneAliasVector)}`
 #'                          The default, `identity`, is no conversion
@@ -1317,7 +1320,7 @@ goldStandardPairs <- function (genes,
                                simplify.network = FALSE,
                                geneAliasFunction = identity){
 
-  stopifnot(simplify.network %in% c(FALSE, 'MST'))
+  stopifnot(simplify.network %in% c(FALSE, 'MST', 'oneEdgePerProtein'))
 
   genes <- unique(genes)
   # remove KRT contaminants
@@ -1369,6 +1372,13 @@ goldStandardPairs <- function (genes,
     combinedPairs[, c('gene1', 'gene2') := .(pmin(from, to), pmax(from,to))]
     combinedPairs <- combinedPairs[, .(gene1, gene2, source)]
   }
+
+  if (simplify.network == 'oneEdgePerProtein'){
+    #message('Pruning ppi set to a single edge per protein...')
+    combinedPairs.f <- pruneProteinsToOnePPIMembership(combinedPairs, plot=FALSE)
+    message(paste0('Reducing number of edges: ', nrow(combinedPairs), ' --> ', nrow(combinedPairs.f)))
+    combinedPairs <- combinedPairs.f[, .(gene1, gene2, source)]
+  }  
 
   return(combinedPairs)
 }
@@ -3398,3 +3408,56 @@ formatCORUMforEPIC <- function(corum.dt, min.members=2){
 # example
 #fwrite(formatCORUMforEPIC('~/Documents/utils/mg_utils/data/corum_humanComplexes.txt', 3), sep='\t', col.names = F,quote=F, ScriptAndDatedFileName('corum.epic.format.txt'))
 
+####
+## PPI prediction work 
+####
+
+#' Simple function to prune PPI datatable to ensure each protein is only represented in one PPI interaction
+#' 
+#' @param ppi.dt data.table of PPI interactions with columns gene1 and gene2
+#' @param plot logical, whether to plot number of edges before and after pruning
+#' @returns data.table of filtered PPI interactions 
+#' @export
+pruneProteinsToOnePPIMembership <- function(ppi.dt, plot=F){
+  
+  message('Found ', nrow(ppi.dt), ' edges in PPI network')
+  message('Restricting entries to one ppi per protein...')
+  
+  # function to filter edges by stepping through the list of ppi and check for presence/absence
+  .filterEdges <- function(ppi){
+    message('Filtering edges from ppi table....')
+    foundProts <- c()
+    filteredEdges <- data.table()
+
+    for (row in 1:nrow(ppi)){
+      prot.pair <- unlist(ppi[row, .(gene1, gene2)])
+      
+      if( !any(prot.pair %in% foundProts) ){
+        foundProts <- c(foundProts, prot.pair)
+        filteredEdges <- rbind(filteredEdges, ppi[row,])
+      }
+    }
+    return(filteredEdges)
+  }
+
+  filtered.ppi <- .filterEdges(ppi.dt)
+
+  # ensure we these rows match the PPI input.. they should just be a subset
+  message(nrow(filtered.ppi), ' edges remaining...')
+  stopifnot( nrow(merge(filtered.ppi, ppi.dt, by=c('gene1', 'gene2'), all.x=F, all.y=F)) == nrow(filtered.ppi) )
+  
+  if (plot == T){
+    dt <- rbind(ppi.dt[, set := 'original'],
+                filtered.ppi[, set := 'pruned'])
+    
+    g <- ggplot(dt[,.N, by=set], aes(x=set, y=N, fill=set)) +
+      geom_bar(stat='identity', color='black') +
+      labs(title='Number of edges') +
+      theme_bw()
+    
+    print(g)
+
+      }  
+      
+  return(filtered.ppi)
+} 
