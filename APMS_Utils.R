@@ -110,8 +110,6 @@ computeZmadex <- function (int.full) {
 
   int.full[int.dt, c('replaceNA', 'mad.exc', 'median.exc', 'Zmadex') := .(replaceNA, mad.exc, median.exc, Zmadex), on = .(run, bait, preyProtein)]
   
-  
-  print ("p values...")
   #convert to p values
   .z2p <- function(int.dt){
     converterFunction <- ecdf(int.dt[excludeGroup == "control", Zmadex])
@@ -120,22 +118,27 @@ computeZmadex <- function (int.full) {
     int.dt[p == 0, p := minP/2]
   }
   
-  .z2p(int.full)
-  
+  if ("control" %in% int.dt$excludeGroup){
+    .z2p(int.full)
+  }else{
+    message ("'control' not found in excludeGroup. Will not compute empirical p-values.")
+  }
+  print ("p values...")
+
   return (int.full)
 }
 
 
 
-roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown"), positiveLabels = "interactor", order= 1L){
-  totalPositive <- dt[label %in% positiveLabels, .N]
-  totalNegative <- dt[label %in% negativeLabels, .N]
+roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown"), positiveLabels = "interactor", order= 1L, labelColumn = "label"){
+  totalPositive <- dt[get(labelColumn) %in% positiveLabels, .N]
+  totalNegative <- dt[get(labelColumn) %in% negativeLabels, .N]
   #setorderv(dt, scoreColumn, na.last = TRUE)
   dt[, scoreRank := frankv(dt, scoreColumn, order = order)]
   rank2score <- unique(dt[, .SD , .SDcols = c(scoreColumn, "scoreRank") ])
   
   
-  roc.dt <- dt[, .( numPositive = sum(label %in% positiveLabels), numNegative = sum(label %in% negativeLabels)), keyby = .(scoreRank)]
+  roc.dt <- dt[, .( numPositive = sum(get(labelColumn) %in% positiveLabels), numNegative = sum(get(labelColumn) %in% negativeLabels)), keyby = .(scoreRank)]
   roc.dt[, tpr := cumsum(numPositive)/totalPositive]
   roc.dt[, fpr := cumsum(numNegative)/totalNegative]
   
