@@ -138,6 +138,29 @@ qcFractionsPerProtein <- function(matrices = NULL, sec.dt = NULL){
 
 
 
+detectLongestIntegerSequence <- function(x){
+  stopifnot ("integer" %in% class(x))
+  .na.rm <- function(x)x[!is.na(x)]
+  x <- sort(as.integer(x))
+  if (any(duplicated(x))){
+    warning("Duplicates in sequence, removing\n")
+    x <- unique(x)
+  }
+  if (length(x) < 2)return (as.integer(length(x))) # 1 or 0
+  longestRun <- (c(NA, x) + 1 == c(x, NA) ) |> # which numbers are one away from the next
+    as.character() |>
+    .na.rm() |>
+    paste0(collapse = "") |> # NATRUETRUEFALSEFALSE...
+    tstrsplit("FALSE") |> # split into runs of TRUE
+    lapply(function(x)unlist(strsplit(x,"TRUE"))) |> # split the TRUE runs into parts, they're empty or boundary, both fine:  "NA" "" ""
+    sapply(length) |> # count the lengths of the TRUE runs
+    max() |> # take the max
+    as.integer() # for some reason, the above produces numeric
+  return (longestRun + 1) # we count the steps above, the run includes boundaries of the step
+}
+
+
+
 ## correlations/overlaps ----
 
 
@@ -717,12 +740,13 @@ scaleByMaxIntensity_global <- function(secLong.dt){
 # matrices ----
 
 #' @param scaleDenom total/max. What to use for the denominator for scaled intensity, total=sum(intensity) or max(intensity)
-
+#' @param intensityColumn overrides any other column selections. Use when use have a pre-computed column in mind
 scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = TRUE, useInterpolated=FALSE,
-                                    preserveSampleRelativeIntensity = FALSE){
+                                    preserveSampleRelativeIntensity = FALSE, intensityColumn = NULL){
 
   sec.dt <- copy(secLong.dt)
 
+  if (is.null(intensityColumn)){
   # reset to ensure intended ints vals (interpolated/no interpolation) used
   columns2nullOut <- intersect (c('intensity_maxScaled', 'intensity_totalScaled'), colnames(sec.dt))
   if (length(columns2nullOut) > 0){
@@ -742,10 +766,14 @@ scaledIntensityMatrices <- function(secLong.dt, scaleDenom = "total", reorder = 
   if(scaleDenom == "max" & !"intensity_maxScaled" %in% colnames(sec.dt))
     scaleByMaxIntensity(sec.dt)
 
-  allProteins <- unique(sec.dt$protein)
 
   v_var <- ifelse(scaleDenom != "none", sprintf("intensity_%sScaled", scaleDenom), 'intensity')
+    
+  }else{
+    v_var <- intensityColumn
+  }
 
+  allProteins <- unique(sec.dt$protein)
   .oneMatrix <- function(sub.dt){
     mat <- dcast(sub.dt, protein~fraction, value.var = v_var)[allProteins,, on = "protein"] |> as.matrix(rownames = "protein")
     mat[is.na(mat)] <- 0.0
@@ -1351,16 +1379,19 @@ goldStandardPairs <- function (genes,
   string[, alias1 := geneAliasFunction(gene1)]
   string[, alias2 := geneAliasFunction(gene2)]
 
-  stringPairs <- string[alias1 < alias2, .(gene1 = alias1, gene2 = alias2)]
+  stringPairs <- string[alias1 < alias2, .(gene1 = alias1, gene2 = alias2, stringCombinedScore = combined_score)]
 
   combinedPairs <- rbindlist( list(corum = corumPairs,
                                    string = stringPairs),
-                              idcol = 'source'
+                              idcol = 'source',
+                              fill = TRUE
   )[
     , .(source = paste0(source, collapse = ";")),
     by = .(gene1, gene2)]
 
   #return (combinedPairs[gene1 %in% genes & gene2 %in% genes])
+  combinedPairs[stringPairs , stringCombinedScore := i.stringCombinedScore, on = c('gene1', 'gene2')]
+
   combinedPairs <- combinedPairs[gene1 %in% genes & gene2 %in% genes]
 
   if (simplify.network == 'MST'){
