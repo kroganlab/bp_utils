@@ -522,7 +522,8 @@ translateGeneName2Entrez <- function (geneNames, species="MOUSE"){
 
 
 translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = FALSE,
-                                      fillMissing = FALSE, isoformAware = FALSE,tryUniprotWeb = FALSE ){
+                                      fillMissing = FALSE, isoformAware = FALSE,tryUniprotWeb = FALSE,
+                                      mapTable = NULL){
   if (isoformAware == TRUE){
     isoforms <- data.table(isoforms = uniprots)
     isoforms[, uniprots := gsub ("-[0-9]+$", "", isoforms)]
@@ -531,7 +532,8 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
   }
   genes <- translateUniprot2Something(uniprots, something = "SYMBOL", 
                              species = species, useDatFile = useDatFile,
-                             fillMissing = fillMissing, tryUniprotWeb)
+                             fillMissing = fillMissing, tryUniprotWeb, 
+                             mapTable = mapTable)
   
   if (isoformAware == TRUE){
     isoforms[, genes := genes]
@@ -542,51 +544,60 @@ translateUniprot2GeneName <- function(uniprots, species = "HUMAN", useDatFile = 
 }
 
 translateUniprot2Something <- function (uniprots, something = "SYMBOL", species = "HUMAN", 
-                                        fillMissing = FALSE, useDatFile = FALSE, tryUniprotWeb = FALSE) {
-  
-  if (useDatFile != FALSE){
-    if (something != "SYMBOL"){
-      stop("Currently only know how to use dat file for gene `SYMBOL`")
-    }
-    if ("character" %in% class(useDatFile))
-      path = useDatFile
-    else
-      path = NULL
-    if (fillMissing != TRUE)
-      message("fillMissing is currently ignored when using datFile")
-    return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
-  }
-  
+                                        fillMissing = FALSE, useDatFile = FALSE, tryUniprotWeb = FALSE,
+                                        mapTable = NULL) {
   uniprotsNoNA <- uniprots[!is.na(uniprots)]
   
-  # do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
-  
-  if (species == "HUMAN"){
-    geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
-  }else if (species == "MOUSE"){
-    geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
-  }else if (species == "RAT"){
-    geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
-  } else {
-    stop("unrecognized species", species)
+  if (is.null(mapTable)){
+    if (useDatFile != FALSE){
+      if (something != "SYMBOL"){
+        stop("Currently only know how to use dat file for gene `SYMBOL`")
+      }
+      if ("character" %in% class(useDatFile))
+        path = useDatFile
+      else
+        path = NULL
+      if (fillMissing != TRUE)
+        message("fillMissing is currently ignored when using datFile")
+      return(translateUniprot2GeneName.datFile(uniprots, species, path = path))
+    }
+    
+    
+    # do AnnotationDbi::columns(org.Hs.eg.db::org.Hs.eg.db) to look up allowed columns
+    
+    if (species == "HUMAN"){
+      geneNames <- AnnotationDbi::mapIds(org.Hs.eg.db::org.Hs.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
+    }else if (species == "MOUSE"){
+      geneNames <- AnnotationDbi::mapIds(org.Mm.eg.db::org.Mm.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
+    }else if (species == "RAT"){
+      geneNames <- AnnotationDbi::mapIds(org.Rn.eg.db::org.Rn.eg.db, unique(uniprotsNoNA), something, 'UNIPROT', multiVals = "first")
+    } else {
+      stop("unrecognized species", species)
+    }
+    
+    # a change in AnnotationDbi::mapIds (updated Feb 2023) makes it return a list, even when multiVals = "first"
+    # not due to a change in AnnodationDbi::mapIds.  
+    # Some weird behavior with sapply (which I use here and also AnnotationDbi uses), not returning a vector when expected.
+    # solved: it happens when there is a NULL in the list.  sapply(list("a", NULL), identity) does not return a vector
+    # the NULL happens when any of uniprots above is NA.  Should be fixed, lets see...
+    
+    if ("list" %in% class(geneNames)){
+      message ("debugMessage: list returned by AnnotationDbi::mapIds")
+      geneNames <- unlist(sapply(geneNames, function(x)x[[1]]))
+    }
+    
+    
+    mapTable <- unique(data.table(uniprot = names(geneNames), gene = geneNames))
+    
   }
   
-  # a change in AnnotationDbi::mapIds (updated Feb 2023) makes it return a list, even when multiVals = "first"
-  # not due to a change in AnnodationDbi::mapIds.  
-  # Some weird behavior with sapply (which I use here and also AnnotationDbi uses), not returning a vector when expected.
-  # solved: it happens when there is a NULL in the list.  sapply(list("a", NULL), identity) does not return a vector
-  # the NULL happens when any of uniprots above is NA.  Should be fixed, lets see...
-
-  if ("list" %in% class(geneNames)){
-    message ("debugMessage: list returned by AnnotationDbi::mapIds")
-    geneNames <- unlist(sapply(geneNames, function(x)x[[1]]))
+  if (!all(c("uniprot", "gene") %in% colnames(mapTable))){
+    stop("Expected column names uniprot and gene in mapTable")
   }
   
-  
-  mapTable <- unique(data.table(uniprot = names(geneNames), gene = geneNames))
-  setkey(mapTable, "uniprot")
+  #setkey(mapTable, "uniprot")
   # this orders all and expands the missing cases
-  mapTable <- mapTable[uniprots]
+  mapTable <- mapTable[uniprots, , on = "uniprot"]
   
   if(tryUniprotWeb == TRUE){
     missing <- mapTable[is.na(gene), unique(uniprot)]
@@ -705,11 +716,13 @@ translateGeneName2Uniprot.datFile <- function(GeneNames, species="HUMAN", path =
 multiUniprots2multiGenes <- function (uniprots, sep = ";", species = "HUMAN",
                                       simplify = FALSE, useDatFile = FALSE,
                                       allowDups = FALSE, isoformAware = FALSE,
-                                      replaceNA = TRUE, tryUniprotWeb = FALSE){
+                                      replaceNA = TRUE, tryUniprotWeb = FALSE,
+                                      mapTable = NULL){
   toGenes <- data.table(uniprots = as.character(unique(uniprots)))
   toGenes <- toGenes[,.(singleUniprot = unlist(strsplit(uniprots, sep))),by = uniprots]
   toGenes[,singleGene := translateUniprot2GeneName(singleUniprot, species = species, useDatFile = useDatFile,
-                                                   isoformAware = isoformAware, tryUniprotWeb = tryUniprotWeb)]
+                                                   isoformAware = isoformAware, tryUniprotWeb = tryUniprotWeb,
+                                                   mapTable = mapTable)]
   if (replaceNA)
     toGenes[is.na(singleGene), singleGene := singleUniprot]
   if (simplify == TRUE){
@@ -790,7 +803,7 @@ multiUniprots2multisomething <- function (uniprots, sep = ";", something = "ENSE
 
 # useful to make sure the same gene symbol is used when combining different datasets
 
-geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN"){
+geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN", prefixNotFound = ""){
 # if (FALSE == require (limma)  )
 #   return (geneAliases)
   if (species == "HUMAN")
@@ -809,7 +822,7 @@ geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN"){
   
   print (aliasTable[is.na(symbol), unique(alias)])
   
-  aliasTable[is.na(symbol), symbol := alias]
+  aliasTable[is.na(symbol), symbol := paste0(prefixNotFound, alias)]
   setkey(aliasTable, alias)
   return (aliasTable[geneAliases,]$symbol)
 }
