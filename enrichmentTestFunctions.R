@@ -919,6 +919,7 @@ fastEnrich <- function (genesOrTable, gmt, minMatchSize= 3, universe = NULL, gro
     cluster.dt <- data.table(gene = genesOrTable[[geneColumn]], group = clusters)
   } else {stop("Unexpected input type. Need character vector or data(frame/table/tibble)")}
 
+  cluster.dt <- unique(cluster.dt)
   
   # define universe
   if (is.null(universe)){
