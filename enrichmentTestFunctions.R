@@ -755,7 +755,21 @@ test_splitCircleHeatMap <- function(){
 loadCORUMasGMT <- function (path = NULL, species = c("HUMAN", "MOUSE"), idType = c("symbol", "uniprot")){
   if (is.null(path))
     stop ("Download and unzip file from ", "http://mips.helmholtz-muenchen.de/corum/download/allComplexes.txt.zip")
-  corumDT <- fread (path)[toupper(Organism) == toupper (species)]
+  
+  new.ids <- c('complex_id', 'complex_name', 'organism', "subunits_uniprot_id","subunits_gene_name")
+  old.ids <- c('ComplexID','ComplexName','Organism', "subunits(UniProt IDs)", "subunits(Gene name)")
+  
+  corumDT <- tryCatch(
+    {
+    fread(path)[toupper(Organism) == toupper (species)]
+    },
+    error = function(e){
+      message(e)
+      message('Checking for new CORUM format...\nModifying colnames to match old format')
+      dt <- fread(path)[toupper(organism) == toupper (species)]
+      setnames(dt, new.ids, old.ids)
+    }
+  )
   if(nrow(corumDT) == 0)
     stop("no rows read from file that match the species requested", path, species)
   # lookup the column name
