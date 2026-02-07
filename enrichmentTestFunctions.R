@@ -1049,4 +1049,256 @@ fastEnrich2ClusterProfilerTable <- function(fe.dt){
 # 
 
 
+#' Based on BP other simplify* functions
+#' Generalized to work with GSEA output
+#' Other adjustment is to use a different distance metric; com
+simplifyGSEABySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
+                                                    cutHeight = 0.80, broadest=FALSE, max_pAdjust = 0.01,
+                                                    distance=NULL,
+                                                    hclustMethod = "complete",
+                                                    plot=T){
+  
+  requiredColumns <- c("pathway", "padj", groupColumn, "leadingEdge")
+  missingColumns <- setdiff(requiredColumns, colnames(enrichResultsTable))
+  if (length(missingColumns) > 0){
+    stop("Missing the required columns ", paste0(missingColumns, collapse = ', '))
+  }
+  
+  if (length(unique(enrichResultsTable$pathway)) < 2){
+    message ("Nothing to simplify")
+    return (list (enrichResultsTable, data.frame()))
+  }
+  
+  setDT(enrichResultsTable); setDT(gmt)
+  
+  ##Select Significant Terms
+  target_overrep_sig <- enrichResultsTable[padj < max_pAdjust,]#qvalue < 0.01]
+  
+  ##Prepare Significant GO Term Jaccard Similarity Matrix
+  sig_terms <- unique(target_overrep_sig$pathway)
+  
+  if (!is.null(groupColumn)){
+    message ("Computing universal gene overlap between ", length(sig_terms), " significant GO terms from ", length(unique(enrichResultsTable[[groupColumn]])), " ", groupColumn, "(s)")
+  }else{
+    message ("Computing universal gene overlap between ", length(sig_terms), " significant GO terms")
+  }
+  
+  if(groupColumn == "cluster"){
+    message ("When group column = cluster, it is renamed to cluster.x to avoid clashing with column names used for enrichment term clusters")
+    groupColumn <- "cluster.x"
+    setnames(enrichResultsTable, old= "cluster", new = "cluster.x")
+  }
+  
+  otherClashingColumns <- c("setSize")
+  if (any(otherClashingColumns %in% colnames(enrichResultsTable))){
+    clashingColumns <- intersect(otherClashingColumns, colnames(enrichResultsTable))
+    stop("Clashing columns found. Rename these and retry: ", paste0(clashingColumns, collapse = ', ') )
+    
+  }
+  
+  # expect gmt in term2gene first 2 column format
+  gmt.subset <- gmt[gmt[[1]] %in% sig_terms, .(ont, gene)]
+ # setnames(gmt.subset, new = c("ont", "gene"))
+  gmt.subset <- gmt[ont %in% sig_terms, .(ont=factor(ont), gene=factor(gene))]
+  termByGeneMat <-  Matrix::sparseMatrix(as.integer(gmt.subset$ont), as.integer(gmt.subset$gene), 
+                                         dimnames=list(levels(gmt.subset$ont), 
+                                                       levels(gmt.subset$gene)))
+  
+  if (tolower(distance) == 'jaccard'){
+    go_dist_mat <- dist(termByGeneMat, method="binary")
+  } else if (tolower(distance) == 'complete'){
+    
+  } else {
+    stop("Distance metric must be either 'jaccard' or 'complete'.\nExiting...") 
+  }
+  # maybe this is faster?  I haven't clocked it
+  # I don't thnk it is .  Takes as long, but uses all your processors while you do it
+  #go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
+  
+  if (hclustMethod != "complete" & cutHeight == 0.99){
+      message ("You requested to cluster using method ", hclustMethod, " but didn't change from default cutHeight from 0.99. It is recommended you adjust cutHeight")
+  }
+  hc <- hclust(go_dist_mat, method = hclustMethod)
+  
+  clusters <- cutree(hc, h=cutHeight)
+  clusters <- data.table (cluster = as.numeric(clusters), pathway = attributes(clusters)$names)
+  
+  message ("Enrichment terms clustered into ", max(clusters$cluster), " clusters")
+  
+  ## go gene set lengths
+  gmt.setLengths <- gmt.subset[,.(setSize = length(unique(gene))), by = ont]
+  clusters <- merge (clusters, gmt.setLengths, by.x="pathway", by.y="ont")
+  
+  ## local gene set lengths  -- only counting those in the leadingEdge
+  id.gene.long <- enrichResultsTable[,.(pathway, gene = unlist(strsplit(leadingEdge, "|"))), by = seq_len(nrow(enrichResultsTable))]
+  genesPerTerm <- id.gene.long[,.(leadingEdgeLength=length(unique(gene))), by = pathway]
+  clusters <- merge (clusters, genesPerTerm, by="pathway")
+  #setorder(clusters, -localSetLength)  # the tie breaker
+  
+  clusterInfo <- merge (enrichResultsTable, clusters, by = "pathway")
+  
+  clusterInfo[, maxSet := max (setSize), by = c("cluster", groupColumn)]
+  #winners <- clusterInfo[,.SD[which(count == maxSet)], by = .(cluster, Bait)]  #keeps all ties...needs updating
+  
+  if (broadest){
+    winners <- clusterInfo[padj < max_pAdjust,.SD[which.max(padj),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$pathway)), " representative enrichment terms choosing the BROADEST significant term per enrichment cluster per ", groupColumn)
+  }else{
+    winners <- clusterInfo[padj < max_pAdjust,.SD[which.min(padj),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$pathway)), " representative enrichment terms choosing the MOST significant term per enrichment cluster per ", groupColumn)
+  }
+  result <- enrichResultsTable[pathway %in% winners$pathway,]
+  result[clusterInfo, cluster.id := cluster, on = "pathway"]
+  
+  if (plot){
+    
+    plot(hc,
+         main = "Clustering of enrichment terms", # Add a main title
+         xlab = "Enrichment terms",                     # Add an x-axis label
+         ylab = "Distance"
+         ) +
+    abline(h = cutHeight, col = "indianred", lwd = 2, lty = 2)
+  }
+  
+  list(simplified = result, clusterInfo = clusterInfo, tree = hc)
+}
 
+#' calculation for the overlap coefficient
+#' Not used...
+#computeMatrixOverlapCoefficient <- function(a, b){
+#  intersection <- length(intersect(a, b))
+#    min.len <- min(length(a), length(b))
+#  return (intersection/min.len)
+#}
+
+# vectorized function to compute overlap coefficient
+computeMatrixOverlapCoefficient <- function(go.mat){
+  intersect.mat <- go.mat %*% t(go.mat)
+  set.size <- apply(go.mat, 1, sum)
+  # pmin to take smallest element
+  min.mat <- outer(set.size, set.size, pmin)
+  
+  overlap.mat <- intersect.mat/min.mat
+  overlap.mat[is.na(overlap.mat)] <- 0 # prob not needed but just in case of divide by zero
+  return(overlap.mat)
+}
+
+#' Based on BP other simplify* functions
+#' Generalized to work with GSEA output
+#' Other adjustment is to use a different distance metric; com
+simplifyGSEABySimilarUniverseMembership <- function(enrichResultsTable, gmt, groupColumn=NULL, 
+                                                    cutHeight = 0.80, broadest=FALSE, max_pAdjust = 0.01,
+                                                    distance=NULL,
+                                                    hclustMethod = "complete",
+                                                    plot=T){
+  
+  requiredColumns <- c("pathway", "padj", groupColumn, "leadingEdge")
+  missingColumns <- setdiff(requiredColumns, colnames(enrichResultsTable))
+  if (length(missingColumns) > 0){
+    stop("Missing the required columns ", paste0(missingColumns, collapse = ', '))
+  }
+ 
+  if (!distance %in% c('jaccard', 'overlap.coef')){
+    stop("Must set distance as either 'jaccard' or 'overlap.coef'...\nExiting...")
+  }
+  
+  if (length(unique(enrichResultsTable$pathway)) < 2){
+    message ("Nothing to simplify")
+    return (list (enrichResultsTable, data.frame()))
+  }
+  
+  setDT(enrichResultsTable); setDT(gmt)
+  
+  ##Select Significant Terms
+  target_overrep_sig <- enrichResultsTable[padj < max_pAdjust,]
+  
+  ##Prepare Significant GO Term Jaccard Similarity Matrix
+  sig_terms <- unique(target_overrep_sig$pathway)
+  
+  if (!is.null(groupColumn)){
+    message ("Computing universal gene overlap between ", length(sig_terms), " significant GO terms from ", length(unique(enrichResultsTable[[groupColumn]])), " ", groupColumn, "(s)")
+  }else{
+    message ("Computing universal gene overlap between ", length(sig_terms), " significant GO terms")
+  }
+  
+  if(groupColumn == "cluster"){
+    message ("When group column = cluster, it is renamed to cluster.x to avoid clashing with column names used for enrichment term clusters")
+    groupColumn <- "cluster.x"
+    setnames(enrichResultsTable, old= "cluster", new = "cluster.x")
+  }
+  
+  otherClashingColumns <- c("setSize")
+  if (any(otherClashingColumns %in% colnames(enrichResultsTable))){
+    clashingColumns <- intersect(otherClashingColumns, colnames(enrichResultsTable))
+    stop("Clashing columns found. Rename these and retry: ", paste0(clashingColumns, collapse = ', ') )
+    
+  }
+  # expect gmt in term2gene first 2 column format
+  gmt.subset <- gmt[gmt[[1]] %in% sig_terms, .(ont, gene)]
+ # factor for int conversion 
+  gmt.subset <- gmt[ont %in% sig_terms, .(ont=factor(ont), gene=factor(gene))]
+  
+  # nice funnction to create binary term x gene matrix. chr -> factor -> int
+  termByGeneMat <-  Matrix::sparseMatrix(as.integer(gmt.subset$ont), as.integer(gmt.subset$gene), 
+                                         dimnames=list(levels(gmt.subset$ont), 
+                                                       levels(gmt.subset$gene)))
+  print(str(termByGeneMat))
+  if (tolower(distance) == 'jaccard'){
+    message('Using Jaccard distance')
+    go_dist_mat <- dist(termByGeneMat, method="binary")
+  
+    } else if (tolower(distance) == 'overlap.coef') {
+    message('Using overlap coefficient distance')
+    oc.mat <- computeMatrixOverlapCoefficient(termByGeneMat)
+    go_dist_mat <- as.dist(1 - oc.mat)
+  }
+  # maybe this is faster?  I haven't clocked it
+  # I don't thnk it is .  Takes as long, but uses all your processors while you do it
+  #go_dist_mat <- parallelDist::parDist(as.matrix(termByGeneMat), method="binary")
+  if (cutHeight == 0.99){
+      message ("You requested to cluster using method ", hclustMethod, " but didn't change from default cutHeight from 0.99. It is recommended you adjust cutHeight")
+  }
+  hc <- hclust(go_dist_mat, method = hclustMethod)
+  
+  clusters <- cutree(hc, h=cutHeight)
+  clusters <- data.table (cluster = as.numeric(clusters), pathway = attributes(clusters)$names)
+  
+  message ("Enrichment terms clustered into ", max(clusters$cluster), " clusters")
+  
+  ## go gene set lengths
+  gmt.setLengths <- gmt.subset[,.(setSize = length(unique(gene))), by = ont]
+  clusters <- merge (clusters, gmt.setLengths, by.x="pathway", by.y="ont")
+  
+  ## local gene set lengths  -- only counting those in the leadingEdge
+  id.gene.long <- enrichResultsTable[,.(pathway, gene = unlist(strsplit(leadingEdge, "|"))), by = seq_len(nrow(enrichResultsTable))]
+  genesPerTerm <- id.gene.long[,.(leadingEdgeLength=length(unique(gene))), by = pathway]
+  clusters <- merge (clusters, genesPerTerm, by="pathway")
+  #setorder(clusters, -localSetLength)  # the tie breaker
+  
+  clusterInfo <- merge (enrichResultsTable, clusters, by = "pathway")
+  
+  clusterInfo[, maxSet := max (setSize), by = c("cluster", groupColumn)]
+  #winners <- clusterInfo[,.SD[which(count == maxSet)], by = .(cluster, Bait)]  #keeps all ties...needs updating
+  
+  if (broadest){
+    winners <- clusterInfo[padj < max_pAdjust,.SD[which.max(padj),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$pathway)), " representative enrichment terms choosing the BROADEST significant term per enrichment cluster per ", groupColumn)
+  }else{
+    winners <- clusterInfo[padj < max_pAdjust,.SD[which.min(padj),],by=c("cluster", groupColumn)]  #chooses the first in case of tie breakers
+    message (length(unique(winners$pathway)), " representative enrichment terms choosing the MOST significant term per enrichment cluster per ", groupColumn)
+  }
+  result <- enrichResultsTable[pathway %in% winners$pathway,]
+  result[clusterInfo, cluster.id := cluster, on = "pathway"]
+  
+  if (plot){
+    
+    plot(hc,
+         main = "Clustering of enrichment terms", # Add a main title
+         xlab = "Enrichment terms",                     # Add an x-axis label
+         ylab = "Distance"
+         ) +
+    abline(h = cutHeight, col = "indianred", lwd = 2, lty = 2)
+  }
+  
+  list(simplified = result, clusterInfo = clusterInfo, tree = hc)
+}

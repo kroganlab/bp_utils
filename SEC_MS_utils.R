@@ -858,9 +858,9 @@ interpolateMissingFractions <- function(matInput){
 
 # Heatmaps ----
 
-intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3, showRowNames = NULL,...){
+intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3, viridis.pal='A', dir=-1, showRowNames = NULL,...){
   denom = 50 / topOfColorRange
-  colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis::magma(51,direction = -1))
+  colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis(51,direction = dir, option=viridis.pal))
   samples <- names(intMats)
 
   sample <- samples[1]
