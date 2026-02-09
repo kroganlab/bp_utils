@@ -17,15 +17,16 @@ example.emmeans.contrastOfContrasts <- function (l, factorFormula = ~drug|tissue
 #'                    the linear model on.  Usually "Protein" or  "gene", etc.
 #' @param emmeansFormula  a formula (or other object) passed as second argument to emmeans. It is expected to be
 #'                        used int he context of contrasts so it must produce a $contrasts field in the output
+#' @param lm.model  User specified option to implement a linear mixed effects (lmm) or linear model (lm). lm is set by default              
 #'                        examples: emmeansFormula = pairwise~GROUP_ORIGINAL or emmeansFormula = trt.vs.ctrl~GROUP_ORIGINAL or trt.vs.ctrl~timeStr|treatment
 #' @param postProcessFunction  a function that receives an lm and returns a data.table. See example.emmeans.contrastOfContrasts for an example 
 
-linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", cl = NULL,
+linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "Protein", lm.model='lm', cl = NULL,
                                      emmeansFormula = NULL, returnLMs = FALSE, postProcessFunction = NULL){
   subsetTables <- split (fullDataTable, fullDataTable[[splitColumn]])
   
   # do al linear models, anova, etc. Result is a list of [[anova, coef]] lists
-  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList, emmeansFormula, postProcessFunction)}, cl = cl)
+  coef.anova.list <- pbapply::pblapply (subsetTables, function(sDT){.linearModelsOneProtein(sDT, formulaList, emmeansFormula, postProcessFunction, lm.model)}, cl = cl)
 
   # get all anova in a  single table
   anovas.list <- lapply(coef.anova.list, `[[`, "anova")
@@ -71,16 +72,21 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   errWarnTable[err == "NULL", err := NA]
   errWarnTable[warn == "NULL", warn := NA]
   
-  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list, postProcess = postProcessTable, residuals = residualsTable))
+  return (list (anova = anovasTable, coef = coefTable, errWarn = errWarnTable, contrast = contrastTable, lms = lms.list, postProcess = postProcessTable, residuals = residualsTable, lm.model))
 } 
 
 
 
 #' the one-protein linear model computation
 
-.linearModelsOneProtein <- function(subsetDT, formulas, emmeansFormula, postProcessFunction){
+.linearModelsOneProtein <- function(subsetDT, formulas, emmeansFormula, postProcessFunction, lm.model){
   #print (subsetDT$Protein[1])
-  lms.out <- lapply (formulas, .errorWarningCatcherFactory(lm), data = subsetDT )
+  if (lm.model == 'lm'){
+    lms.out <- lapply (formulas, .errorWarningCatcherFactory(lm), data = subsetDT )
+  } else if (lm.model == 'lmm'){
+    lms.out <- lapply (formulas, .errorWarningCatcherFactory(lmerTest::lmer), data = subsetDT )   
+  }
+  
 
   errorWarnTable <- data.table (model = names (lms.out),
                                 err = as.character(lapply (lms.out, `[[`, "err")),
@@ -91,22 +97,22 @@ linearModelsAllProteins <- function (fullDataTable, formulaList, splitColumn = "
   
   if(length(lms) > 0){
     coef.list <- lapply (lms, function(lm.out)as.data.table(coefficients(summary(lm.out)), keep.rownames = TRUE))
-    coef.table <- rbindlist(coef.list, idcol = "model")
+    coef.table <- rbindlist(coef.list, idcol = "model", fill=T)
     setnames (coef.table, old = c("rn", "Pr(>|t|)"), new = c("term", "p.value"), skip_absent = TRUE)
     
     #f.tests from anova function
     anova.list <- lapply (lms, function(l)as.data.table(anova(l), keep.rownames=TRUE))
-    anovaTables <- rbindlist(anova.list, idcol = "model")
-    
-    anovaTables[, sigCode := dplyr::case_when(`Pr(>F)`< 0.001 ~ "***",
-                                              `Pr(>F)`< 0.01  ~ "**",
-                                              `Pr(>F)`< 0.05  ~ "*",
-                                              `Pr(>F)`< 0.1  ~ ".",
-                                              TRUE ~ "")]
+    anovaTables <- rbindlist(anova.list, idcol = "model", fill=T)
+    # data.table replacement for case_when 
+    anovaTables[, sigCode := fcase(`Pr(>F)`< 0.001, "***",
+                                   `Pr(>F)`< 0.01, "**",
+                                   `Pr(>F)`< 0.05,"*",
+                                   `Pr(>F)`< 0.1, ".",
+                                   default = "")]
     
     # residuals
-    residuals.list <- lapply(lms, function(l)cbind(as.data.table(l$model), data.table(residuals = residuals(l), fitted = fitted(l))))
-    residuals.dt <- rbindlist(residuals.list, idcol = "model")
+    residuals.list <- lapply(lms, function(l)cbind(as.data.table(model.frame(l)), data.table(residuals = residuals(l), fitted = fitted(l))))
+    residuals.dt <- rbindlist(residuals.list, idcol = "model", fill=T)
     
     # get all contrasts from emmeans
     contrastTable <- NULL
