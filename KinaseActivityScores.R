@@ -47,7 +47,7 @@ loadKinaseDataFromKSEAFile <- function (ksDataFile = "./data/PSP&NetworKIN_Kinas
 #     resources to select source of enz-sub information see get_ptms_resources for options
 
 
-loadKinaseDataOmniPath <- function(species = "HUMAN", removeNonKinases = TRUE, fixNames = TRUE, ...){
+loadEnzymeDataOmniPath <- function (species = "HUMAN", fixNames = TRUE, ...){
   species <- toupper(species)
   organismID <- c(HUMAN = 9606, RAT = 10116, MOUSE = 10090)[species]
   if(is.na(organismID))
@@ -55,6 +55,20 @@ loadKinaseDataOmniPath <- function(species = "HUMAN", removeNonKinases = TRUE, f
   enzsub <- OmnipathR::import_omnipath_enzsub(organism = organismID,...)
   setDT (enzsub)
   # for consistency with loadKinaseData I need columns: "CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"
+
+  if (fixNames){
+    setnames(enzsub, 
+             old = c("enzyme_genesymbol", "substrate_genesymbol", "residue_type", "residue_offset", "substrate"), 
+             new = c("CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"))
+  }
+
+  return (enzsub)  
+}
+
+
+
+loadKinaseDataOmniPath <- function(species = "HUMAN", removeNonKinases = TRUE, fixNames = TRUE, ...){
+  enzsub <- loadEnzymeDataOmniPath(species, fixNames = FALSE, ...)
   
   if (any(grepl("ProtMapper", enzsub$sources))){
     message ("OmniPath includes ProtMapper data which has many non-kinases.")
@@ -85,6 +99,7 @@ loadKinaseDataOmniPath <- function(species = "HUMAN", removeNonKinases = TRUE, f
              old = c("enzyme_genesymbol", "substrate_genesymbol", "residue_type", "residue_offset", "substrate"), 
              new = c("CTRL_GENE_NAME", "TARGET_GENE_NAME", "TARGET_RES", "TARGET_POS", "TARGET_UP_ID"))
   }
+  
   
   return (enzsub[modification == "phosphorylation"])
 }
