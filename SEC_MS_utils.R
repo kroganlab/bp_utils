@@ -860,7 +860,7 @@ interpolateMissingFractions <- function(matInput){
 
 intensityHeatmaps <- function(intMats, intensityName = "Scaled Intensity", topOfColorRange = 0.3, viridis.pal='A', dir=-1, showRowNames = NULL,...){
   denom = 50 / topOfColorRange
-  colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis(51,direction = dir, option=viridis.pal))
+  colorFun <- circlize::colorRamp2(breaks = (0:50)/denom, colors = viridis::viridis(51,direction = dir, option=viridis.pal))
   samples <- names(intMats)
 
   sample <- samples[1]
@@ -3286,7 +3286,7 @@ createSyntheticProteinProfiles <- function(secLong.dt, ints.dt, intsCol='intensi
                         cluster_columns = F,
                         column_names_gp = gpar(fontsize = 5),
                         column_labels = ifelse(as.integer(colnames(intsMats[[n]])) %% 5 == 0, colnames(intsMats[[n]]), ""),
-                        col=viridis(10),
+                        col=viridis::viridis(10),
                         show_row_names=F
                         )
         })
