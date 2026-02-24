@@ -338,6 +338,10 @@ myQueryUniprot <- function (query = character(0L),
   queries <- paste0("accession:", uniprots)
   res <- setDT(UniProt.ws::queryUniProt(queries, fields = fields))
   #print (res)
+  if (! "Entry" %in% colnames(res)){
+    print (res)
+    return(res)
+  }
   res[uniprots,query := Entry , on = "Entry"]
   res[]
   
@@ -820,7 +824,7 @@ geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN", prefixN
            " will be replaced with official symbols, and ",
            aliasTable[is.na(symbol), length(alias)], " were not found in alias table") 
   
-  print (aliasTable[is.na(symbol), unique(alias)])
+  message ("not found: ", aliasTable[is.na(symbol), paste0(unique(alias), collapse = "  ")])
   
   aliasTable[is.na(symbol), symbol := paste0(prefixNotFound, alias)]
   setkey(aliasTable, alias)
