@@ -3167,6 +3167,8 @@ createSyntheticProteinProfiles <- function(secLong.dt, ints.dt, intsCol='intensi
                                            proportionFirstProtein=seq(0.1, 1, 0.1),
                                            plot=TRUE, nCores=1, ...){
 
+  sec.data <- copy(secLong.dt)
+  
   # setting up parallel processing
   if (nCores > parallel::detectCores()){
     nCores <- parallel::detectCores() - 2
@@ -3305,7 +3307,7 @@ createSyntheticProteinProfiles <- function(secLong.dt, ints.dt, intsCol='intensi
   # bin the intensities
   mats.bins.ls <- lapply(unique(ints.dt$bin), function(b){
     prots.oi <- ints.dt[bin == b, unique(protein)]
-    mat <- .makeOneMatrix(sub.dt = subdt[protein %in% prots.oi], intsCol=intsCol, logTransform = FALSE)
+    mat <- .makeOneMatrix(sub.dt = sec.data[protein %in% prots.oi], intsCol=intsCol, logTransform = FALSE)
     return(mat)
   })
   names(mats.bins.ls) <- unique(ints.dt$bin)
