@@ -3494,3 +3494,42 @@ pruneProteinsToOnePPIMembership <- function(ppi.dt, plot=F){
       
   return(filtered.ppi)
 } 
+
+#' Function to plot cross-correlation scores between samples as a function of fraction offset
+#' @param fractCor.dt data.table produced from qcFractionByFractionCorrelation
+#' @param fraction.range fraction offset range relative to reference sample (default=5)
+#' @param grouping 'intragroup', 'intergroup' or 'all' to specify which comparisons to plot (default='intragroup')
+qcCrossCorrelationPlot <- function(fractCor.dt, fraction.range=5, grouping){
+  
+  stopifnot(grouping %in% c('intragroup', 'intergroup', 'all') | length(grouping) > 1)
+  message('restricting scores to +/- ', fraction.range, ' fractions relative to reference')
+  
+  if (grouping == 'intragroup'){
+    cross.dt <- fractCor.dt[ref.treatment == other.treatment & ref.replicate != other.replicate] 
+    print(dim(cross.dt))
+  } else if (grouping == 'intergroup'){
+    cross.dt <- fractCor.dt[ref.treatment != other.treatment]
+    print(dim(cross.dt))
+  } else if (grouping == 'all'){
+    cross.dt <- fractCor.dt[ref.sample != other.sample]
+    print(dim(cross.dt))
+  }
+  cross.dt <- cross.dt[between(ref.fraction, other.fraction - fraction.range, other.fraction + fraction.range)][, comparison := paste0(ref.sample, '-', other.sample), by=.I]
+  cross.dt[, offset := factor(as.integer(ref.fraction) - as.integer(other.fraction))]
+  
+  comparison.oi <- sapply(strsplit(unique(cross.dt$comparison), '-'), function(x){ return(paste(sort(unlist(x)), collapse='-')) }) %>% 
+    unique()
+
+  # drop redundant set 
+  g <- ggplot(cross.dt[comparison %in% comparison.oi,], aes(x=offset, y=pearson)) +
+    geom_violin() +
+    ggforce::geom_sina(aes(color=ref.fraction)) +
+    stat_summary(fun='median', geom='point', color='red', size=15, shape='-') +
+  #  geom_smooth(aes(x=as.integer(offset), y=pearson),color='maroon', se=FALSE) + 
+    labs(title='Pearson cross-correlation scores', subtitle=paste(grouping, 'comparisons')) +
+    facet_wrap(~comparison) +
+    viridis::scale_color_viridis(option='D', direction=1, name='reference sample fraction') +
+    clean.customTheme
+  
+  print(g)
+}
