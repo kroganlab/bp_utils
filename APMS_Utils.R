@@ -1,6 +1,8 @@
 
 
 
+box::use(data.table)
+
 #' requires MASS
 #' @param subInt a data.table of apms intensity, subsetted to a single prey. 
 #'               required columns are bait,log2Intensity
@@ -91,8 +93,32 @@ replaceNAByModelingOnPartlyMissing <- function(subInt, minOverall = 20, minOffse
 #'                  `log2Intensity` log2Intensity, normalized, and with explicit NA. Each run must have a value, NA or not.
 #'                  `excludeGroup` a character vector that groups runs to exclude in Zmad calculation for a given row (but usually bait-wise)
 #'                                 there must be a `control` group to serve as background for p value distribution
+#'                  `excludeGlobally` a logical vector, when TRUE, this will be excluded from all median and mad calculations. 
+#'                                    This was added to allow for excluding bait as prey (where a bait is treated as its own prey).
+#'                                    If not available, it will be added and set to TRUE based on columns bait, baitGene, baitProtein, preyGene, preyProtein
 #'                  
-computeZmadex <- function (int.full) {
+computeZmadex <- function (int.full, randomSeed = NULL) {
+  if (is.null(randomSeed)){
+    message ("Setting random seed to 42")
+    randomSeed <- 42
+  }
+  set.seed(randomSeed)
+  
+  if (!"excludeGlobally" %in% colnames(int.full)){
+    int.full[, excludeGlobally := FALSE]
+    if("preyGene" %in% colnames(int.full)){
+      int.full[preyGene == bait, excludeGlobally := TRUE]
+      if("baitGene" %in% colnames(int.full)){
+        int.full[baitGene == preyGene, excludeGlobally := TRUE]
+      }
+    }
+    if ("baitProtein" %in% colnames(int.full)){
+      int.full[baitProtein == preyProtein, excludeGlobally := TRUE]
+    }
+    numEG <- int.full[excludeGlobally == TRUE, .N]
+    if(numEG > 0)
+      message (numEG, " entries excluded as bait-as-prey based on equality between (possible) columns bait, baitGene, baitProtein and preyGene, preyProtein. See column, excludeGlobally in int.full")
+  }
   preyTables <- split (int.full , by = "preyProtein")
   
   print ("imputing...")
@@ -102,8 +128,8 @@ computeZmadex <- function (int.full) {
   )
   
   print ("mad median and Zmadex calculations...")
-  purrr::walk(preyTables, function(dt)dt[,mad.exc := mad(   dt$replaceNA[dt$excludeGroup != excludeGroup]), by = .(bait, excludeGroup) ], .progress = "mad ...")
-  purrr::walk(preyTables, function(dt)dt[,median.exc := median(dt$replaceNA[dt$excludeGroup != excludeGroup]), by = .(bait, excludeGroup)], .progress = "median ..." )
+  purrr::walk(preyTables, function(dt)dt[,mad.exc := mad(      dt$replaceNA[dt$excludeGroup != excludeGroup & dt$excludeGlobally != TRUE]), by = .(bait, excludeGroup) ], .progress = "mad ...")
+  purrr::walk(preyTables, function(dt)dt[,median.exc := median(dt$replaceNA[dt$excludeGroup != excludeGroup & dt$excludeGlobally != TRUE]), by = .(bait, excludeGroup)], .progress = "median ..." )
   purrr::walk(preyTables, function(dt)dt[, Zmadex  := (log2Intensity - median.exc)/mad.exc], .progress = "Zmadex ...")
 
   int.dt <- rbindlist(preyTables, use.names = TRUE, fill = TRUE)
@@ -130,9 +156,12 @@ computeZmadex <- function (int.full) {
 
 
 
-roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown"), positiveLabels = "interactor", order= 1L, labelColumn = "label"){
-  totalPositive <- dt[get(labelColumn) %in% positiveLabels, .N]
-  totalNegative <- dt[get(labelColumn) %in% negativeLabels, .N]
+roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown"), positiveLabels = "interactor", order= 1L, labelColumn = "label",
+                   totalPositive = NULL, totalNegative = NULL){
+  if (is.null(totalPositive))
+    totalPositive <- dt[get(labelColumn) %in% positiveLabels, .N]
+  if (is.null(totalNegative))
+    totalNegative <- dt[get(labelColumn) %in% negativeLabels, .N]
   #setorderv(dt, scoreColumn, na.last = TRUE)
   dt[, scoreRank := frankv(dt, scoreColumn, order = order)]
   rank2score <- unique(dt[, .SD , .SDcols = c(scoreColumn, "scoreRank") ])
@@ -147,7 +176,8 @@ roc.dt <- function(dt, scoreColumn = "p", negativeLabels = c("decoy", "unknown")
   return (roc.dt)
 }
 
-
+#' @param maxPositives denominators for TPR. Either a single number used for all groups. Or a data.frame/table with columns groupByColumns and `totalPositive`
+#' @param maxNegatives denominators for FPR. Either a single number used for all groups. Or a data.frame/table with columns groupByColumns and `totalNegative`
 
 roc.dt.groups <- function(dt, scoreColumn = "p", 
                           negativeLabels = c("decoy", "unknown"), 
@@ -155,22 +185,31 @@ roc.dt.groups <- function(dt, scoreColumn = "p",
                           order= 1L, groupByColumns = c(""),
                           maxPositives = NULL, maxNegatives = NULL){
   
-  # create group-specific totalPositive and totalNegative
+  # create group-specific totalPositive and totalNegative tables
   if (is.null(maxPositives)){
     totalPositive <- dt[label %in% positiveLabels, .(totalPositive = .N), by =groupByColumns]
   }else{
-    totalPositive <- dt[, .(totalPositive = maxPositives), by = groupByColumns]
+    if ("data.frame" %in% class(maxPositives))
+      totalPositive <- maxPositives
+    else
+      totalPositive <- dt[, totalPositive = maxPositives, by = groupByColumns]
   }
   if (is.null(maxNegatives)){
     totalNegative <- dt[label %in% negativeLabels, .(totalNegative = .N), by = groupByColumns]
   }else{
-    totalNegative <- dt[, .(totalNegative = maxNegatives), by = groupByColumns]
+    if ("data.frame" %in% class(maxPositives))
+      totalNegative <- maxNegatives
+    else
+      totalNegative <- dt[, totalNegative = maxNegatives, by = groupByColumns]
   }
   
   
   #setorderv(dt, scoreColumn, na.last = TRUE)
   dt[, scoreRank := frankv(.SD, scoreColumn, order = order), by = groupByColumns]
   rank2score <- unique(dt[, .SD , .SDcols = c(scoreColumn, "scoreRank"), by = groupByColumns])
+  maxGranularity <- rank2score[, .N, by = groupByColumns][, max(N)]
+  if (maxGranularity > 1000)
+    message ("ROC will be computed at ", maxGranularity, " steps in score column ", scoreColumn,". Consider rounding to decrease granularity.")
   
   
   roc.dt <- dt[, .( numPositive = sum(label %in% positiveLabels), numNegative = sum(label %in% negativeLabels)), keyby = c(groupByColumns, "scoreRank")]
