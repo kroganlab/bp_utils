@@ -526,6 +526,22 @@ loadGmtFromBioconductor <- function (dbName = "org.Hs.eg.db", ontology = "BP", k
   return(gmt)
 }
 
+loadGmtFromBioconductor_new <- function (dbName = "org.Hs.eg.db", ontology = "BP", keyType = "UNIPROT"){ #c("UNIPROT", "SYMBOL"
+  message ("Using package ", dbName, " version ", packageVersion(dbName))
+  GO <- clusterProfiler:::get_GO_data(dbName, ontology, keyType)
+  # gmt <- rbindlist(lapply (GO@gsid2gene, function(x) data.table(ont.id = x)), idcol="gene")
+  # gmt$ont <- GO@gsid2name[gmt$ont.id]
+  gmt <- merge(GO@gsid2gene, GO@gsid2name, by= "gsid", all = T)
+  colnames(gmt)[which(colnames(gmt) == "gsid")] <- "ont.id"
+  colnames(gmt)[which(colnames(gmt) == "name")] <- "ont"
+  gmt$ont.id <- as.character(gmt$ont.id)
+  setDT(gmt)
+  setcolorder(gmt, c("ont", "gene", "ont.id"))
+  setDF(gmt)
+  return(gmt)
+}
+
+
 
 
 loadKegg <- function (organism=c("hsa", "mmu")[1], keyType = c("uniprot", "kegg", "ncbi-geneid", "ncbi-proteinid")[1]){
