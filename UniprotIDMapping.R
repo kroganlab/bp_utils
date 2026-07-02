@@ -807,7 +807,7 @@ multiUniprots2multisomething <- function (uniprots, sep = ";", something = "ENSE
 
 # useful to make sure the same gene symbol is used when combining different datasets
 
-geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN", prefixNotFound = ""){
+geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN", prefixNotFound = "", returnAliasTable = FALSE ){
 # if (FALSE == require (limma)  )
 #   return (geneAliases)
   if (species == "HUMAN")
@@ -824,10 +824,11 @@ geneAlias2officialGeneSymbol <- function(geneAliases, species = "HUMAN", prefixN
            " will be replaced with official symbols, and ",
            aliasTable[is.na(symbol), length(alias)], " were not found in alias table") 
   
-  message ("not found: ", aliasTable[is.na(symbol), paste0(unique(alias), collapse = "  ")])
+  message ("not found (examples): ", aliasTable[is.na(symbol), paste0(head (unique(alias)), collapse = "  ")])
   
   aliasTable[is.na(symbol), symbol := paste0(prefixNotFound, alias)]
   setkey(aliasTable, alias)
+  if(returnAliasTable) return(aliasTable)
   return (aliasTable[geneAliases,]$symbol)
 }
 

@@ -44,6 +44,8 @@ GetStringIDMapping <- function (identifiers,
 
 
 GetGenesFromStringIDs <- function (stringIDs, stringAliasFile = "/Users/ben/Downloads/9606.protein.aliases.v11.5.txt.gz", sources = c("BioMart_HUGO", "Ensembl_UniProt_GN", "Ensembl_EntrezGene", "BLAST_KEGG_NAME_SYNONYM", "Ensembl_UniProt", "BLAST_UniProt_AC"), returnTable = FALSE){
+  stop("doesn't work, use preferred names from file like /Users/ben/Downloads/9606.protein.info.v12.0.txt ")
+
   uniqueIDs <- unique(stringIDs)
   aliases <- fread (stringAliasFile)
   message ("There are ", sum (uniqueIDs %in% aliases$`#string_protein_id`), " stringIDs found in string table, and ",

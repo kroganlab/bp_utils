@@ -230,7 +230,8 @@ PlotNMFHeatmap <- function (nmf.out,
   
   
   Heatmap(mainMatrix, name = name,
-          cluster_columns = FALSE, col = mainColors,
+          #cluster_columns = FALSE,
+          col = mainColors,
           top_annotation = topAnnotation,
           left_annotation = leftAnnotation,
           ...) 

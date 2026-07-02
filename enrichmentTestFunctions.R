@@ -842,7 +842,7 @@ oneColumnFGSEA <- function (columnName, mat, sets, scoreType = c("std", "pos", "
 #'             can optionally pass a term2gene data.frame with terms in first column and genes/uniprots in second
 #' @param scoreType is chosen based on presence of negative or positive values in the matrix
 #' @param ... arguments to pass to oneColumnFGSEA and ultimately fgsea::fgsea
-matrixFGSEA <- function (mat, sets, ...){
+matrixFGSEA <- function (mat, sets, progressBar = TRUE, ...){
   anyPositive <- any(mat > 0, na.rm = TRUE)
   anyNegative <- any(mat < 0, na.rm = TRUE)
   if (anyPositive & anyNegative)
@@ -860,7 +860,11 @@ matrixFGSEA <- function (mat, sets, ...){
     sets <- split(sets[[2]], sets[[1]])
   }
   
-  all.sea <- pbapply::pblapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
+  if(progressBar)
+    .func.lapply <- pbapply::pblapply
+  else .func.lapply <- lapply
+  
+  all.sea <- .func.lapply (colnames(mat), oneColumnFGSEA, mat, sets, scoreType, ...)
   names(all.sea) <- colnames(mat)
   sea.dt <- rbindlist(all.sea, idcol = "group")
   
