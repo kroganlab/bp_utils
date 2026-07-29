@@ -1,7 +1,6 @@
 
 
 
-box::use(data.table)
 
 #' requires MASS
 #' @param subInt a data.table of apms intensity, subsetted to a single prey. 
@@ -132,9 +131,42 @@ computeZmadex <- function (int.full, randomSeed = NULL) {
   purrr::walk(preyTables, function(dt)dt[,median.exc := median(dt$replaceNA[dt$excludeGroup != excludeGroup & dt$excludeGlobally != TRUE]), by = .(bait, excludeGroup)], .progress = "median ..." )
   purrr::walk(preyTables, function(dt)dt[, Zmadex  := (log2Intensity - median.exc)/mad.exc], .progress = "Zmadex ...")
 
+  
+  .doTtest <- function (log2Intensity, preyTable, eg, bait){
+    log2Intensity <- log2Intensity[!is.na(log2Intensity)]
+    background <- preyTable[excludeGroup != eg & excludeGlobally != TRUE & !is.na(replaceNA), replaceNA]
+    
+    # # check for sufficient data:
+    # tryCAtch should handle this now
+    # if (length(log2Intensity) < 2 | length(background) <2){
+    #   return (list(p.value = NA_real_, `estimate.mean of x` = mean(log2Intensity), `estimate.mean of y` = mean(background), conf.int1  = NA_real_, conf.int2 = NA_real_))
+    # }
+    
+    #print (c(sum(!is.na(log2Intensity)), sum(!is.na(background))))
+    result = tryCatch({
+      t.out <- t.test (log2Intensity, background, equal.var = TRUE)
+      result =  (as.list(unlist(t.out[c("p.value","estimate", "conf.int")])))
+    },
+    error = function(e){
+      #message ("Error caught: ", e)
+      result =  (list(p.value = NA_real_, `estimate.mean of x` = mean(log2Intensity), `estimate.mean of y` = mean(background), conf.int1  = NA_real_, conf.int2 = NA_real_))
+    }
+    )
+    return (result)
+  }
+  
+    
+  purrr::walk(preyTables, function(dt)dt[, c("t.test.p", "t.meanAtBait", "t.meanAtBG", "t.conf.int1" , "t.conf.int2" ) := 
+                                           .doTtest(log2Intensity, dt, excludeGroup, bait),
+                                         by = .(bait, excludeGroup)],
+              .progress = "T tests ...")
+
   int.dt <- rbindlist(preyTables, use.names = TRUE, fill = TRUE)
 
-  int.full[int.dt, c('replaceNA', 'mad.exc', 'median.exc', 'Zmadex') := .(replaceNA, mad.exc, median.exc, Zmadex), on = .(run, bait, preyProtein)]
+  int.full[int.dt, c('replaceNA', 'mad.exc', 'median.exc', 'Zmadex',
+                     "t.test.p", "t.log2FC", "t.lowerCI") := .(replaceNA, mad.exc, median.exc, Zmadex,
+                                                                    t.test.p, t.meanAtBait - t.meanAtBG, t.conf.int1),
+           on = .(run, bait, preyProtein)]
   
   #convert to p values
   .z2p <- function(int.dt){
@@ -142,6 +174,7 @@ computeZmadex <- function (int.full, randomSeed = NULL) {
     int.dt[, p := 1 - converterFunction(Zmadex)]
     minP <- int.dt[p > 0, min(p, na.rm = TRUE)]
     int.dt[p == 0, p := minP/2]
+    setnames(int.dt, old = "p", new = "p.Z")
   }
   
   if ("control" %in% int.dt$excludeGroup){
@@ -151,7 +184,7 @@ computeZmadex <- function (int.full, randomSeed = NULL) {
   }
   print ("p values...")
 
-  return (int.full)
+  return (int.full[])
 }
 
 
@@ -367,5 +400,65 @@ corumPairs <- function(corum.path = "~/Downloads/corum_humanComplexes.txt",
   return(corumPairs)
 }
 
+# SAINT & COMPPASS utils ----
+
+
+simpleEvidenceToCompass <- function (ev, keys, filterRegEx= "CON__|REV__", types = c("MULTI-MSMS", "MSMS", "MULTI-SECPEP"), extraColumns = character(0)){
+  
+  stopifnot ("Raw file" %in% colnames(ev))
+  stopifnot ("RawFile" %in% colnames(keys))
+  
+  
+  
+  keyedEv <- merge (keys, ev, by.x = "RawFile", "by.y" = "Raw file")[, c(colnames(keys), c("Modified sequence", "Charge", "Proteins", "Type", "MS/MS count" ,"Intensity" )), with = FALSE]
+  
+  #filter
+  keyedEv <- keyedEv[!grepl(filterRegEx, Proteins)]
+  
+  #Spectral.Count
+  spc <- keyedEv[!is.na(Proteins) & Proteins != "", .(Spectral.Count = sum(`MS/MS count`)), by = c(extraColumns, "RawFile", "Condition" , "BaitName", "BioReplicate", "Proteins")]
+  
+  
+  setnames(spc, 
+           old = c("Condition",    "BaitName","BioReplicate",  "Proteins"),
+           new = c("Experiment.ID", "Bait",   "Replicate",     "Prey"))
+  
+  setDT(spc)
+}
+
+
+protQuant2SaintInput <- function (pq, extraColumns = character(0), filterRegEx= "CON__|REV__", controlRegEx = c("GFP|Empty")){
+  #filter
+  pq <- pq[!grepl(filterRegEx, Protein)]
+  
+  # baits
+  baits.txt <- pq[, .(TorC = ""), keyby = c(extraColumns, "SUBJECT", "GROUP")]
+  setnames(baits.txt, old = c("SUBJECT", "GROUP"), new = c("runName", "baitName"))
+  baits.txt[, TorC := ifelse(grepl(controlRegEx, baitName), "C", "T")]
+  message ("Labeling baits ", baits.txt[TorC == "C", paste0(unique(baitName), collapse = ";")], " as controls. Adjust controlRegEx as needed if that does not look correct/copmplete")
+  
+  
+  #preys
+  uniprots <- unique(pq$Protein)
+  singleUniprots <- uniprots[!grepl(";", uniprots)]
+  message ("Loading information from uniprot web serfvices for ", length(singleUniprots), " uniprot identifiers")
+  # bp_utils/UniprotIDMapping.R
+  
+  up.info <- uniprotInfoFromWeb(singleUniprots)
+  preys.txt <- data.table(preyNameUniprot = uniprots)
+  preys.txt[up.info, preyLength := i.Length, on = c(preyNameUniprot = "Entry")]
+  if (any(is.na(preys.txt$preyLength))){
+    message (preys.txt[is.na(preyLength), .N], " proteins have missing length information from uniprot (includes any multi-proteins). Setting to 299")
+    preys.txt[is.na(preyLength), preyLength := 299]
+  }
+  preys.txt[, preyNameGene := multiUniprots2multiGenes(preyNameUniprot)]
+  
+  interactions.txt <- pq[, .SD, .SDcols = c(extraColumns, "SUBJECT", "GROUP", "Protein", "LogIntensities")]
+  setnames(interactions.txt, old = c("SUBJECT", "GROUP", "Protein", "LogIntensities"), new = c("runName", "baitName", "preyNameUniprot", "scoreIntOrSPC"))
+  interactions.txt[, scoreIntOrSPC := 2^scoreIntOrSPC]
+  
+  
+  return (list (baits.txt = baits.txt, preys.txt = preys.txt, interactions.txt = interactions.txt))
+}
 
 
